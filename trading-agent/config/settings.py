@@ -48,11 +48,22 @@ _supabase_overrides = _load_supabase_overrides()
 class Settings(BaseSettings):
     """Application settings with validation."""
 
+    # ============ EXCHANGE SELECTION ============
+    # Choose which exchange to use: "hyperliquid" or "alpaca"
+    EXCHANGE: str = Field(default="alpaca")
+
     # ============ EXCHANGE - HYPERLIQUID ============
     # These are ALWAYS loaded from environment variables (secrets)
     HYPERLIQUID_API_KEY: str = Field(default="")
     HYPERLIQUID_SECRET: str = Field(default="")
     HYPERLIQUID_TESTNET: bool = Field(default=True)
+
+    # ============ EXCHANGE - ALPACA ============
+    # Get your API keys from https://alpaca.markets (Paper Trading)
+    ALPACA_API_KEY: str = Field(default="")
+    ALPACA_SECRET_KEY: str = Field(default="")
+    ALPACA_PAPER_TRADING: bool = Field(default=True)
+    ALPACA_BASE_URL: str = Field(default="https://paper-api.alpaca.markets")
 
     # ============ TRADING PARAMETERS ============
     # These can be overridden from Supabase

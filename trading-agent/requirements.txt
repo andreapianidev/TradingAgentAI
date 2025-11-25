@@ -5,6 +5,7 @@ pydantic-settings>=2.1.0
 
 # Exchange
 ccxt>=4.2.0
+alpaca-py>=0.21.0
 
 # Database
 sqlalchemy>=2.0.0

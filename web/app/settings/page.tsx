@@ -109,6 +109,39 @@ export default function SettingsPage() {
     const value = getValue(setting)
     const key = setting.setting_key
 
+    // Exchange selector (dropdown)
+    if (key === 'exchange') {
+      return (
+        <select
+          value={value || 'hyperliquid'}
+          onChange={(e) => handleChange(key, e.target.value)}
+          className="input w-40"
+        >
+          <option value="hyperliquid">Hyperliquid</option>
+          <option value="alpaca">Alpaca</option>
+        </select>
+      )
+    }
+
+    // Timeframe selector (dropdown)
+    if (key === 'timeframe') {
+      return (
+        <select
+          value={value || '15m'}
+          onChange={(e) => handleChange(key, e.target.value)}
+          className="input w-32"
+        >
+          <option value="1m">1 minute</option>
+          <option value="5m">5 minutes</option>
+          <option value="15m">15 minutes</option>
+          <option value="30m">30 minutes</option>
+          <option value="1h">1 hour</option>
+          <option value="4h">4 hours</option>
+          <option value="1d">1 day</option>
+        </select>
+      )
+    }
+
     // Boolean settings
     if (typeof value === 'boolean' || value === 'true' || value === 'false') {
       const boolValue = value === true || value === 'true'

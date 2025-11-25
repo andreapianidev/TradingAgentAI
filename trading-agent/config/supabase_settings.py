@@ -21,6 +21,8 @@ class SupabaseSettingsLoader:
         'paper_trading_initial_balance': 'PAPER_TRADING_INITIAL_BALANCE',
         'target_symbols': 'TARGET_SYMBOLS',
         'timeframe': 'TIMEFRAME',
+        'exchange': 'EXCHANGE',
+        'alpaca_paper_trading': 'ALPACA_PAPER_TRADING',
         'max_leverage': 'MAX_LEVERAGE',
         'default_leverage': 'DEFAULT_LEVERAGE',
         'max_position_size_pct': 'MAX_POSITION_SIZE_PCT',

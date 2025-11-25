@@ -12,6 +12,7 @@ import {
   Area,
   AreaChart
 } from 'recharts'
+import { Activity } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/utils'
 
@@ -67,24 +68,8 @@ export default function EquityChart() {
           })
         })))
       } else {
-        // Generate sample data for demo
-        const sampleData: ChartDataPoint[] = []
-        const now = new Date()
-        let equity = 10000
-        for (let i = 30; i >= 0; i--) {
-          const date = new Date(now)
-          date.setDate(date.getDate() - i)
-          equity = equity + (Math.random() - 0.48) * 100
-          sampleData.push({
-            timestamp: date.toISOString(),
-            equity: Math.max(equity, 8000),
-            date: date.toLocaleDateString('en-US', {
-              month: 'short',
-              day: 'numeric'
-            })
-          })
-        }
-        setData(sampleData)
+        // No data available - show empty state
+        setData([])
       }
     } catch (error) {
       console.error('Error fetching chart data:', error)
@@ -111,6 +96,16 @@ export default function EquityChart() {
     return (
       <div className="h-64 flex items-center justify-center">
         <div className="animate-pulse text-gray-500">Loading chart...</div>
+      </div>
+    )
+  }
+
+  if (data.length === 0) {
+    return (
+      <div className="h-64 flex flex-col items-center justify-center text-gray-500">
+        <Activity className="w-12 h-12 mb-3 opacity-50" />
+        <p className="text-lg">No trading data yet</p>
+        <p className="text-sm mt-1">Start the bot to see your equity curve</p>
       </div>
     )
   }

@@ -68,19 +68,8 @@ export default function Dashboard() {
           totalTrades: snapshot.total_trades || 0
         })
       } else {
-        // Default stats for new accounts
-        setStats({
-          totalEquity: 10000,
-          availableBalance: 10000,
-          totalPnl: 0,
-          totalPnlPct: 0,
-          dailyPnl: 0,
-          dailyPnlPct: 0,
-          openPositionsCount: 0,
-          exposurePct: 0,
-          winRate: 0,
-          totalTrades: 0
-        })
+        // No data yet - will show loading state
+        setStats(null)
       }
 
       // Fetch open positions
@@ -126,8 +115,21 @@ export default function Dashboard() {
     )
   }
 
+  // Show awaiting state when no data
+  const showAwaitingState = !stats
+
   return (
     <div className="space-y-6">
+      {showAwaitingState && (
+        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5 text-yellow-500" />
+          <div>
+            <p className="text-yellow-500 font-medium">Awaiting trading data</p>
+            <p className="text-gray-400 text-sm">Start the trading bot to see real-time data</p>
+          </div>
+        </div>
+      )}
+
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Total Equity */}
@@ -136,9 +138,9 @@ export default function Dashboard() {
             <div className="stat-label">Total Equity</div>
             <DollarSign className="w-5 h-5 text-gray-500" />
           </div>
-          <div className="stat-value">{formatCurrency(stats?.totalEquity || 0)}</div>
-          <div className={cn('stat-change', getPnlColor(stats?.totalPnlPct || 0))}>
-            {formatPercent(stats?.totalPnlPct || 0)} all time
+          <div className="stat-value">{stats ? formatCurrency(stats.totalEquity) : '—'}</div>
+          <div className={cn('stat-change', stats ? getPnlColor(stats.totalPnlPct) : 'text-gray-500')}>
+            {stats ? `${formatPercent(stats.totalPnlPct)} all time` : 'No data'}
           </div>
         </div>
 
@@ -146,17 +148,17 @@ export default function Dashboard() {
         <div className="stat-card">
           <div className="flex items-center justify-between">
             <div className="stat-label">Daily P&L</div>
-            {(stats?.dailyPnl || 0) >= 0 ? (
+            {stats && stats.dailyPnl >= 0 ? (
               <TrendingUp className="w-5 h-5 text-green-500" />
             ) : (
               <TrendingDown className="w-5 h-5 text-red-500" />
             )}
           </div>
-          <div className={cn('stat-value', getPnlColor(stats?.dailyPnl || 0))}>
-            {formatCurrency(stats?.dailyPnl || 0)}
+          <div className={cn('stat-value', stats ? getPnlColor(stats.dailyPnl) : 'text-gray-500')}>
+            {stats ? formatCurrency(stats.dailyPnl) : '—'}
           </div>
-          <div className={cn('stat-change', getPnlColor(stats?.dailyPnlPct || 0))}>
-            {formatPercent(stats?.dailyPnlPct || 0)} today
+          <div className={cn('stat-change', stats ? getPnlColor(stats.dailyPnlPct) : 'text-gray-500')}>
+            {stats ? `${formatPercent(stats.dailyPnlPct)} today` : 'No data'}
           </div>
         </div>
 
@@ -166,9 +168,9 @@ export default function Dashboard() {
             <div className="stat-label">Win Rate</div>
             <Target className="w-5 h-5 text-gray-500" />
           </div>
-          <div className="stat-value">{((stats?.winRate || 0) * 100).toFixed(1)}%</div>
+          <div className="stat-value">{stats ? `${(stats.winRate * 100).toFixed(1)}%` : '—'}</div>
           <div className="stat-change text-gray-400">
-            {stats?.totalTrades || 0} total trades
+            {stats ? `${stats.totalTrades} total trades` : 'No trades'}
           </div>
         </div>
 
@@ -178,9 +180,9 @@ export default function Dashboard() {
             <div className="stat-label">Exposure</div>
             <Activity className="w-5 h-5 text-gray-500" />
           </div>
-          <div className="stat-value">{(stats?.exposurePct || 0).toFixed(1)}%</div>
+          <div className="stat-value">{stats ? `${stats.exposurePct.toFixed(1)}%` : '—'}</div>
           <div className="stat-change text-gray-400">
-            {stats?.openPositionsCount || 0} open positions
+            {stats ? `${stats.openPositionsCount} open positions` : 'No positions'}
           </div>
         </div>
       </div>
