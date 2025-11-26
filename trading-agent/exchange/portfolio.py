@@ -16,17 +16,19 @@ class PortfolioManager:
 
     def __init__(self):
         """Initialize the portfolio manager with appropriate client based on mode."""
-        if settings.PAPER_TRADING:
-            from exchange.paper_trading import paper_client
-            self.client = paper_client
-            self.is_paper_trading = True
-            logger.info("PortfolioManager initialized in PAPER TRADING mode")
-        else:
-            # Use exchange factory to get the appropriate client
-            from exchange.exchange_factory import get_exchange_client
-            self.client = get_exchange_client()
-            self.is_paper_trading = False
-            logger.info(f"PortfolioManager initialized in LIVE TRADING mode (Exchange: {settings.EXCHANGE})")
+        from exchange.exchange_factory import get_exchange_client
+
+        # ALWAYS use the exchange client (Alpaca) - it handles paper/live mode internally
+        # The old PAPER_TRADING flag was for an internal simulator - we don't use that anymore
+        # Alpaca has its own paper trading mode via ALPACA_PAPER_TRADING
+        self.client = get_exchange_client()
+
+        # Determine if we're in paper trading mode based on Alpaca settings
+        self.is_paper_trading = settings.ALPACA_PAPER_TRADING if settings.EXCHANGE == "alpaca" else settings.PAPER_TRADING
+
+        mode_str = "PAPER" if self.is_paper_trading else "LIVE"
+        logger.info(f"PortfolioManager initialized - Exchange: {settings.EXCHANGE.upper()}, Mode: {mode_str}")
+        logger.info(f"Using Alpaca API: {settings.ALPACA_BASE_URL}")
 
         self._initial_equity = None
 

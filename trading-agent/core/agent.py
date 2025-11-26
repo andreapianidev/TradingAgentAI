@@ -105,12 +105,8 @@ class TradingAgent:
             "errors": [],
         }
 
-        # Check SL/TP in paper trading mode
-        if portfolio_manager.is_paper_trading:
-            closed_by_sltp = portfolio_manager.check_stop_loss_take_profit()
-            if closed_by_sltp:
-                for closed in closed_by_sltp:
-                    logger.info(f"[PAPER] Position closed by {closed.get('close_reason', 'SL/TP')}")
+        # Note: Stop loss/take profit are handled by Alpaca's native order system
+        # No need to manually check here - Alpaca executes SL/TP orders automatically
 
         # Get portfolio state
         portfolio = portfolio_manager.get_portfolio_state()
@@ -197,17 +193,22 @@ class TradingAgent:
         logger.info("=" * 50)
         logger.info(f"Cycle completed in {duration:.2f}s")
 
-        # Show paper trading summary
-        if portfolio_manager.is_paper_trading:
-            summary = portfolio_manager.get_paper_trading_summary()
-            if summary:
-                logger.info("-" * 30)
-                logger.info("PAPER TRADING SUMMARY:")
-                logger.info(f"  Initial: ${summary['initial_balance']:,.2f}")
-                logger.info(f"  Current: ${summary['current_equity']:,.2f}")
-                logger.info(f"  P&L: ${summary['total_pnl']:,.2f} ({summary['total_pnl_pct']:+.2f}%)")
-                logger.info(f"  Trades: {summary['total_trades']} | Win Rate: {summary['win_rate']:.1f}%")
-                logger.info(f"  Open Positions: {summary['open_positions']}")
+        # Show portfolio summary
+        portfolio_final = portfolio_manager.get_portfolio_state()
+        mode_label = "PAPER" if portfolio_manager.is_paper_trading else "LIVE"
+        logger.info("-" * 30)
+        logger.info(f"PORTFOLIO SUMMARY ({mode_label} - Alpaca):")
+        logger.info(f"  Equity: ${portfolio_final.get('total_equity', 0):,.2f}")
+        logger.info(f"  Available: ${portfolio_final.get('available_balance', 0):,.2f}")
+        logger.info(f"  Exposure: {portfolio_final.get('exposure_pct', 0):.1f}%")
+        logger.info(f"  Open Positions: {len(portfolio_final.get('positions', []))}")
+
+        # Log individual positions
+        for pos in portfolio_final.get("positions", []):
+            pnl = pos.get("unrealized_pnl", 0)
+            pnl_pct = pos.get("unrealized_pnl_pct", 0)
+            logger.info(f"    {pos.get('symbol')}: {pos.get('direction')} @ ${pos.get('entry_price', 0):.2f} | "
+                       f"P&L: ${pnl:.2f} ({pnl_pct:+.2f}%)")
 
         logger.info("=" * 50)
 
@@ -418,19 +419,30 @@ class TradingAgent:
             portfolio = portfolio_manager.get_portfolio_state()
             alpaca_positions = portfolio.get("positions", [])
 
-            logger.info(f"Found {len(alpaca_positions)} positions on Alpaca")
+            logger.info("-" * 50)
+            logger.info("SYNCING POSITIONS FROM ALPACA TO DATABASE")
+            logger.info(f"Alpaca has {len(alpaca_positions)} open positions:")
+
+            for pos in alpaca_positions:
+                logger.info(f"  → {pos.get('symbol')}: {pos.get('direction')} @ ${pos.get('entry_price', 0):.2f} "
+                           f"qty={pos.get('quantity', 0):.6f} P&L=${pos.get('unrealized_pnl', 0):.2f}")
 
             # Sync to database
             sync_result = db_ops.sync_positions_from_alpaca(alpaca_positions)
 
             if sync_result["created"]:
-                logger.info(f"Created positions: {sync_result['created']}")
+                logger.info(f"✓ Created new positions in DB: {sync_result['created']}")
             if sync_result["updated"]:
-                logger.info(f"Updated positions: {sync_result['updated']}")
+                logger.info(f"✓ Updated existing positions: {sync_result['updated']}")
             if sync_result["closed"]:
-                logger.info(f"Closed positions not on Alpaca: {sync_result['closed']}")
+                logger.info(f"✓ Closed positions not on Alpaca: {sync_result['closed']}")
             if sync_result["duplicates_cleaned"]:
-                logger.info(f"Cleaned up {sync_result['duplicates_cleaned']} duplicate positions")
+                logger.info(f"✓ Cleaned up {sync_result['duplicates_cleaned']} duplicate positions")
+
+            if not any([sync_result["created"], sync_result["updated"], sync_result["closed"], sync_result["duplicates_cleaned"]]):
+                logger.info("✓ Database already in sync with Alpaca")
+
+            logger.info("-" * 50)
 
         except Exception as e:
             logger.warning(f"Failed to sync positions from Alpaca: {e}")

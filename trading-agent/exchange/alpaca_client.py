@@ -85,8 +85,16 @@ class AlpacaClient:
             account = self.trading_client.get_account()
 
             mode = "PAPER" if paper else "LIVE"
-            logger.info(f"Connected to Alpaca {mode} trading")
-            logger.info(f"Account equity: ${float(account.equity):,.2f}")
+            logger.info("=" * 60)
+            logger.info(f"ALPACA CONNECTION SUCCESSFUL - {mode} TRADING")
+            logger.info("=" * 60)
+            logger.info(f"  Account Status: {account.status}")
+            logger.info(f"  Account Equity: ${float(account.equity):,.2f}")
+            logger.info(f"  Buying Power: ${float(account.buying_power):,.2f}")
+            logger.info(f"  Cash: ${float(account.cash):,.2f}")
+            logger.info(f"  API Endpoint: {settings.ALPACA_BASE_URL}")
+            logger.info(f"  Crypto Trading: Enabled")
+            logger.info("=" * 60)
 
             self._connected = True
             return True
@@ -364,6 +372,8 @@ class AlpacaClient:
             positions = self._retry_request(self.trading_client.get_all_positions)
             open_positions = []
 
+            logger.debug(f"Fetching positions from Alpaca... Found {len(positions)} raw positions")
+
             for pos in positions:
                 qty = float(pos.qty)
                 if qty != 0:
@@ -375,7 +385,7 @@ class AlpacaClient:
                     # Determine direction
                     direction = "long" if qty > 0 else "short"
 
-                    open_positions.append({
+                    position_data = {
                         "symbol": symbol,
                         "direction": direction,
                         "entry_price": float(pos.avg_entry_price),
@@ -385,8 +395,13 @@ class AlpacaClient:
                         "unrealized_pnl": float(pos.unrealized_pl),
                         "unrealized_pnl_pct": float(pos.unrealized_plpc) * 100,
                         "liquidation_price": 0,  # N/A for Alpaca
-                    })
+                    }
+                    open_positions.append(position_data)
 
+                    logger.debug(f"  Position: {symbol} {direction} @ ${float(pos.avg_entry_price):.2f} "
+                                f"qty={abs(qty):.6f} P&L=${float(pos.unrealized_pl):.2f}")
+
+            logger.info(f"Alpaca positions loaded: {len(open_positions)} open positions")
             return open_positions
 
         except Exception as e:
