@@ -417,28 +417,64 @@ class TradingAgent:
             }
 
     def _get_news_safe(self) -> List[Dict[str, Any]]:
-        """Get news with error handling."""
+        """Get news with error handling and save to database."""
         try:
-            return get_recent_news(5)
+            news = get_recent_news(10)  # Get more news for database storage
+
+            # Save news to database (deduplicates automatically)
+            if news:
+                try:
+                    saved_count = db_ops.save_news_batch(news)
+                    if saved_count > 0:
+                        logger.debug(f"Saved {saved_count} new news items to database")
+                except Exception as e:
+                    logger.debug(f"Error saving news to database: {e}")
+
+            return news[:5]  # Return top 5 for LLM analysis
         except Exception as e:
             logger.warning(f"Failed to get news: {e}")
             return []
 
     def _get_whale_alerts_safe(self) -> List[Dict[str, Any]]:
-        """Get whale alerts with error handling."""
+        """Get whale alerts with error handling and save to database."""
         try:
-            alerts = get_whale_alerts(limit=10, min_value_usd=1_000_000)
+            alerts = get_whale_alerts(limit=20, min_value_usd=1_000_000)
+
+            # Save whale alerts to database (deduplicates automatically)
             if alerts:
                 logger.info(f"Found {len(alerts)} whale transactions (>$1M)")
-            return alerts
+                try:
+                    saved_count = db_ops.save_whale_alerts_batch(alerts)
+                    if saved_count > 0:
+                        logger.debug(f"Saved {saved_count} new whale alerts to database")
+                except Exception as e:
+                    logger.debug(f"Error saving whale alerts to database: {e}")
+
+            return alerts[:10]  # Return top 10 for analysis
         except Exception as e:
             logger.warning(f"Failed to get whale alerts: {e}")
             return []
 
     def _analyze_whale_flow_safe(self) -> Dict[str, Any]:
-        """Analyze whale capital flow with error handling."""
+        """Analyze whale capital flow with error handling and save summary."""
         try:
-            return analyze_whale_flow()
+            flow = analyze_whale_flow()
+
+            # Save whale flow summary to database if significant
+            if flow.get("alert_count", 0) > 0:
+                try:
+                    db_ops.save_whale_flow_summary(
+                        symbol="ALL",  # Aggregated across all symbols
+                        inflow_exchange=flow.get("inflow_exchange", 0),
+                        outflow_exchange=flow.get("outflow_exchange", 0),
+                        net_flow=flow.get("net_flow", 0),
+                        alert_count=flow.get("alert_count", 0),
+                        interpretation=flow.get("interpretation")
+                    )
+                except Exception as e:
+                    logger.debug(f"Error saving whale flow summary: {e}")
+
+            return flow
         except Exception as e:
             logger.warning(f"Failed to analyze whale flow: {e}")
             return {

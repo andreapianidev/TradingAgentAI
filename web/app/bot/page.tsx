@@ -18,7 +18,11 @@ import {
   Clock,
   Target,
   BarChart3,
-  Filter
+  Filter,
+  Newspaper,
+  Fish,
+  Waves,
+  ExternalLink
 } from 'lucide-react'
 import { cn, formatCurrency, formatPercent } from '@/lib/utils'
 import { supabase, TradingDecision, TradingPortfolioSnapshot } from '@/lib/supabase'
@@ -26,15 +30,16 @@ import { supabase, TradingDecision, TradingPortfolioSnapshot } from '@/lib/supab
 interface ActivityLog {
   id: string
   timestamp: string
-  type: 'decision' | 'market' | 'portfolio' | 'system'
+  type: 'decision' | 'market' | 'portfolio' | 'system' | 'news' | 'whale'
   level: 'info' | 'success' | 'warning' | 'error'
   symbol?: string
   action?: string
   message: string
   details?: any
+  url?: string
 }
 
-type FilterType = 'all' | 'decision' | 'market' | 'portfolio'
+type FilterType = 'all' | 'decision' | 'market' | 'portfolio' | 'news' | 'whale'
 
 export default function BotConsolePage() {
   const [activities, setActivities] = useState<ActivityLog[]>([])
@@ -80,6 +85,20 @@ export default function BotConsolePage() {
         .from('trading_portfolio_snapshots')
         .select('*')
         .order('timestamp', { ascending: false })
+        .limit(20)
+
+      // Fetch recent news
+      const { data: news } = await supabase
+        .from('trading_news')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(30)
+
+      // Fetch recent whale alerts
+      const { data: whaleAlerts } = await supabase
+        .from('trading_whale_alerts')
+        .select('*')
+        .order('created_at', { ascending: false })
         .limit(20)
 
       if (snapshots && snapshots.length > 0) {
@@ -159,6 +178,50 @@ export default function BotConsolePage() {
         })
       })
 
+      // Add news
+      news?.forEach(n => {
+        const sentimentEmoji = n.sentiment === 'positive' ? '📈' : n.sentiment === 'negative' ? '📉' : '📊'
+        logs.push({
+          id: `news-${n.id}`,
+          timestamp: n.published_at || n.created_at,
+          type: 'news',
+          level: n.sentiment === 'negative' ? 'warning' : 'info',
+          message: `${sentimentEmoji} ${n.title}`,
+          url: n.url,
+          details: {
+            summary: n.summary,
+            source: n.source,
+            sentiment: n.sentiment,
+            symbols: n.symbols
+          }
+        })
+      })
+
+      // Add whale alerts
+      whaleAlerts?.forEach(w => {
+        const amountUsd = parseFloat(w.amount_usd || '0')
+        const flowIcon = w.flow_direction === 'inflow' ? '🔴' : w.flow_direction === 'outflow' ? '🟢' : '⚪'
+        const flowLabel = w.flow_direction === 'inflow' ? 'TO Exchange' : w.flow_direction === 'outflow' ? 'FROM Exchange' : 'Transfer'
+
+        logs.push({
+          id: `whale-${w.id}`,
+          timestamp: w.transaction_time || w.created_at,
+          type: 'whale',
+          level: amountUsd > 10000000 ? 'warning' : 'info',
+          symbol: w.symbol,
+          message: `${flowIcon} ${w.symbol} Whale: $${(amountUsd / 1000000).toFixed(1)}M ${flowLabel}`,
+          details: {
+            amount: w.amount,
+            amount_usd: amountUsd,
+            blockchain: w.blockchain,
+            from_type: w.from_type,
+            to_type: w.to_type,
+            flow_direction: w.flow_direction,
+            tx_hash: w.tx_hash
+          }
+        })
+      })
+
       // Sort by timestamp
       logs.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
 
@@ -198,6 +261,10 @@ export default function BotConsolePage() {
         return <BarChart3 className="w-4 h-4 text-cyan-500" />
       case 'portfolio':
         return <DollarSign className="w-4 h-4 text-yellow-500" />
+      case 'news':
+        return <Newspaper className="w-4 h-4 text-orange-500" />
+      case 'whale':
+        return <Fish className="w-4 h-4 text-blue-400" />
       default:
         return <Terminal className="w-4 h-4 text-gray-500" />
     }
@@ -211,6 +278,8 @@ export default function BotConsolePage() {
       case 'decision': return 'text-purple-400'
       case 'market': return 'text-cyan-400'
       case 'portfolio': return 'text-yellow-400'
+      case 'news': return 'text-orange-400'
+      case 'whale': return 'text-blue-400'
       default: return 'text-gray-400'
     }
   }
@@ -252,19 +321,19 @@ export default function BotConsolePage() {
 
         <div className="flex items-center gap-2">
           {/* Filter */}
-          <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
-            {(['all', 'decision', 'market', 'portfolio'] as FilterType[]).map(f => (
+          <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 overflow-x-auto">
+            {(['all', 'decision', 'market', 'portfolio', 'news', 'whale'] as FilterType[]).map(f => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
                 className={cn(
-                  'px-3 py-1.5 rounded text-sm transition-colors',
+                  'px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap',
                   filter === f
                     ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
                 )}
               >
-                {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
+                {f === 'all' ? 'All' : f === 'whale' ? 'Whale' : f.charAt(0).toUpperCase() + f.slice(1)}
               </button>
             ))}
           </div>
@@ -396,7 +465,9 @@ export default function BotConsolePage() {
                         'flex-shrink-0 px-1.5 py-0.5 rounded text-xs uppercase',
                         log.type === 'decision' && 'bg-purple-500/10 text-purple-400',
                         log.type === 'market' && 'bg-cyan-500/10 text-cyan-400',
-                        log.type === 'portfolio' && 'bg-yellow-500/10 text-yellow-400'
+                        log.type === 'portfolio' && 'bg-yellow-500/10 text-yellow-400',
+                        log.type === 'news' && 'bg-orange-500/10 text-orange-400',
+                        log.type === 'whale' && 'bg-blue-500/10 text-blue-400'
                       )}>
                         {log.type}
                       </span>
@@ -412,6 +483,20 @@ export default function BotConsolePage() {
                       <span className={cn('break-all', getLogColor(log.type, log.level))}>
                         {log.message}
                       </span>
+
+                      {/* External link for news */}
+                      {log.url && (
+                        <a
+                          href={log.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex-shrink-0 p-1 text-gray-400 hover:text-blue-400 transition-colors"
+                          title="Open article"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      )}
                     </div>
 
                     {/* Expanded Details */}
@@ -423,9 +508,41 @@ export default function BotConsolePage() {
                             <p className="text-sm text-gray-700 dark:text-gray-300">{log.details.reasoning}</p>
                           </div>
                         )}
-                        <pre className="text-xs text-gray-500 dark:text-gray-400 whitespace-pre-wrap overflow-x-auto">
-                          {JSON.stringify(log.details, null, 2)}
-                        </pre>
+                        {log.type === 'news' && log.details.summary && (
+                          <div className="mb-3">
+                            <div className="text-xs text-gray-500 mb-1">Summary:</div>
+                            <p className="text-sm text-gray-700 dark:text-gray-300">{log.details.summary}</p>
+                            {log.details.source && (
+                              <p className="text-xs text-gray-500 mt-2">Source: {log.details.source}</p>
+                            )}
+                          </div>
+                        )}
+                        {log.type === 'whale' && (
+                          <div className="mb-3 space-y-1">
+                            <div className="text-xs text-gray-500">Transaction Details:</div>
+                            <div className="grid grid-cols-2 gap-2 text-sm">
+                              <div className="text-gray-600 dark:text-gray-400">Amount:</div>
+                              <div className="text-gray-900 dark:text-white">${log.details.amount_usd?.toLocaleString()}</div>
+                              <div className="text-gray-600 dark:text-gray-400">From:</div>
+                              <div className="text-gray-900 dark:text-white">{log.details.from_type || 'Unknown'}</div>
+                              <div className="text-gray-600 dark:text-gray-400">To:</div>
+                              <div className="text-gray-900 dark:text-white">{log.details.to_type || 'Unknown'}</div>
+                              <div className="text-gray-600 dark:text-gray-400">Flow:</div>
+                              <div className={cn(
+                                log.details.flow_direction === 'inflow' && 'text-red-400',
+                                log.details.flow_direction === 'outflow' && 'text-green-400'
+                              )}>
+                                {log.details.flow_direction === 'inflow' ? '→ Exchange (Sell pressure)' :
+                                 log.details.flow_direction === 'outflow' ? '← Exchange (Buy pressure)' : 'Transfer'}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {log.type !== 'news' && log.type !== 'whale' && (
+                          <pre className="text-xs text-gray-500 dark:text-gray-400 whitespace-pre-wrap overflow-x-auto">
+                            {JSON.stringify(log.details, null, 2)}
+                          </pre>
+                        )}
                       </div>
                     )}
                   </div>
@@ -439,17 +556,23 @@ export default function BotConsolePage() {
 
       {/* Footer with stats */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200 dark:border-gray-800 text-xs text-gray-500">
-        <div className="flex flex-wrap items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3">
           <span>{filteredActivities.length} activities</span>
           <span className="hidden sm:inline text-gray-300 dark:text-gray-700">|</span>
           <span className="hidden sm:flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-purple-500" /> Decisions: {activities.filter(a => a.type === 'decision').length}
+            <span className="w-2 h-2 rounded-full bg-purple-500" /> {activities.filter(a => a.type === 'decision').length}
           </span>
           <span className="hidden sm:flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-cyan-500" /> Market: {activities.filter(a => a.type === 'market').length}
+            <span className="w-2 h-2 rounded-full bg-cyan-500" /> {activities.filter(a => a.type === 'market').length}
           </span>
           <span className="hidden sm:flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-yellow-500" /> Portfolio: {activities.filter(a => a.type === 'portfolio').length}
+            <span className="w-2 h-2 rounded-full bg-yellow-500" /> {activities.filter(a => a.type === 'portfolio').length}
+          </span>
+          <span className="hidden sm:flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-orange-500" /> {activities.filter(a => a.type === 'news').length}
+          </span>
+          <span className="hidden sm:flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-blue-400" /> {activities.filter(a => a.type === 'whale').length}
           </span>
         </div>
         <div className="flex items-center gap-2">

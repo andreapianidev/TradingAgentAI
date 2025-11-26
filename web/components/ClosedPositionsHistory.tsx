@@ -43,7 +43,7 @@ const rowVariants = {
     x: 0,
     transition: {
       delay: i * 0.03,
-      type: "spring",
+      type: "spring" as const,
       stiffness: 100,
       damping: 15
     }
@@ -62,7 +62,7 @@ const filterVariants = {
     height: "auto",
     marginBottom: 16,
     transition: {
-      type: "spring",
+      type: "spring" as const,
       stiffness: 100,
       damping: 15
     }

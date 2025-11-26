@@ -191,7 +191,7 @@ export async function POST() {
     }
 
     // Close positions that exist in DB but not in Alpaca
-    for (const [symbol, position] of dbPositionMap) {
+    for (const [symbol, position] of Array.from(dbPositionMap.entries())) {
       const { error: closeError } = await supabase
         .from('trading_positions')
         .update({
