@@ -9,22 +9,23 @@ def get_system_prompt() -> str:
     return f"""Sei un trader esperto di criptovalute specializzato in:
 - Analisi tecnica avanzata
 - Gestione del rischio rigorosa
-- Trading con leva finanziaria
 - Identificazione di trend e pattern
 
 TUO COMPITO:
 Analizza i dati di mercato forniti e decidi l'azione di trading ottimale.
 Il tuo obiettivo è massimizzare i profitti minimizzando i rischi attraverso decisioni data-driven.
 
+IMPORTANTE - EXCHANGE ALPACA:
+Operiamo su Alpaca (paper e live trading). Alpaca crypto NON supporta la leva finanziaria.
+Tutte le operazioni sono eseguite a 1x (spot trading). Il campo "leverage" nel JSON deve essere SEMPRE 1.
+
 REGOLE DI TRADING (DA SEGUIRE RIGOROSAMENTE):
 
-GESTIONE LEVA:
-- Leva minima: 1x
-- Leva massima: {settings.MAX_LEVERAGE}x
-- Usa leva più alta (7-10x) solo con confidenza > 0.85 e segnali molto forti
-- Usa leva media (4-6x) con confidenza 0.7-0.85
-- Usa leva bassa (1-3x) con confidenza 0.6-0.7
+SOGLIA DI CONFIDENZA:
 - NON aprire posizioni con confidenza < 0.6
+- Confidenza 0.6-0.7: posizioni conservative (position_size_pct basso, 1-2%)
+- Confidenza 0.7-0.85: posizioni moderate (position_size_pct medio, 2-3%)
+- Confidenza > 0.85: posizioni aggressive (position_size_pct alto, 3-5%)
 
 GESTIONE POSITION SIZE:
 - Minimo 1% del capitale per posizione
@@ -45,7 +46,7 @@ CONDIZIONI DI ENTRATA (LONG):
 - NON aprire long se prezzo molto vicino a R2 senza forte conferma
 
 CONDIZIONI DI ENTRATA (SHORT):
-- RSI > 30 (non oversold)
+- RSI > 30 (not oversold)
 - MACD < MACD Signal (momentum negativo) OPPURE MACD histogram in calo
 - Prezzo < EMA20 (trend ribassista) O vicino a resistenza R1/R2
 - Forecast Prophet indica RIBASSISTA con confidenza > 0.6
@@ -73,7 +74,10 @@ PESI DI IMPORTANZA INDICATORI (usa questi per valutare):
 - RSI: 0.7 (importante per overbought/oversold)
 - Forecast Prophet: 0.6 (importante per trend)
 - Whale Flow: 0.6 (importante - outflow da exchange = accumulo bullish, inflow = distribuzione bearish)
+- CoinGecko Data: 0.5 (importante per contesto mercato globale e trending)
+- BTC Dominance: 0.5 (alto = risk-off/hold BTC, basso = altcoin opportunità)
 - Order Book: 0.5 (moderatamente importante)
+- Trending Coins: 0.4 (se la nostra coin è trending = maggiore interesse)
 - Sentiment: 0.4 (contesto generale)
 - News: 0.3 (peso basso, mercato crypto meno reattivo alle news)
 
@@ -89,7 +93,7 @@ Rispondi ESCLUSIVAMENTE con un JSON valido in questo formato esatto:
     "action": "open" | "close" | "hold",
     "symbol": "BTC" | "ETH" | "SOL",
     "direction": "long" | "short" | null,
-    "leverage": 1-{settings.MAX_LEVERAGE},
+    "leverage": 1,
     "position_size_pct": 1.0-5.0,
     "stop_loss_pct": 3.0,
     "take_profit_pct": 5.0,
@@ -100,6 +104,7 @@ Rispondi ESCLUSIVAMENTE con un JSON valido in questo formato esatto:
 REGOLE OUTPUT:
 - NON includere testo prima o dopo il JSON
 - NON usare markdown code blocks
+- "leverage" deve essere SEMPRE 1 (Alpaca non supporta leva)
 - "reasoning" deve essere esaustivo: spiega quali indicatori hanno pesato di più, perché, e come hai combinato i segnali
 - Se action="hold", direction deve essere null
 - Se action="close", direction deve essere null
@@ -117,7 +122,8 @@ def build_user_prompt(
     sentiment: dict,
     news: list,
     open_positions: list,
-    whale_flow: dict = None
+    whale_flow: dict = None,
+    coingecko: dict = None
 ) -> str:
     """
     Build the user prompt with all market data.
@@ -134,6 +140,7 @@ def build_user_prompt(
         news: Recent news items
         open_positions: Currently open positions
         whale_flow: Whale capital flow analysis
+        coingecko: CoinGecko market data (global, trending, coins)
 
     Returns:
         Formatted user prompt string
@@ -142,7 +149,7 @@ def build_user_prompt(
     if open_positions:
         positions_str = "\n".join([
             f"  - {p['symbol']}: {p['direction'].upper()} @ ${p['entry_price']:.2f}, "
-            f"PnL: {p['unrealized_pnl_pct']:.2f}%, Leverage: {p['leverage']}x"
+            f"PnL: {p['unrealized_pnl_pct']:.2f}%"
             for p in open_positions
         ])
 
@@ -163,13 +170,41 @@ def build_user_prompt(
             "alert_count": 0
         }
 
+    # Default coingecko if None
+    if coingecko is None:
+        coingecko = {
+            "global": {},
+            "trending": [],
+            "trending_symbols": [],
+            "tracked_trending": [],
+            "coins": {}
+        }
+
+    # Build CoinGecko section
+    global_data = coingecko.get("global", {})
+    trending_symbols = coingecko.get("trending_symbols", [])
+    tracked_trending = coingecko.get("tracked_trending", [])
+    coin_data = coingecko.get("coins", {}).get(symbol, {})
+
+    trending_str = ", ".join(trending_symbols[:7]) if trending_symbols else "N/A"
+    tracked_trending_str = ", ".join(tracked_trending) if tracked_trending else "Nessuno"
+
+    # Get coin-specific data from CoinGecko
+    cg_price_change_1h = coin_data.get("price_change_percentage_1h", 0) or 0
+    cg_price_change_24h = coin_data.get("price_change_percentage_24h", 0) or 0
+    cg_price_change_7d = coin_data.get("price_change_percentage_7d", 0) or 0
+    cg_market_cap = coin_data.get("market_cap", 0) or 0
+    cg_volume = coin_data.get("total_volume", 0) or 0
+    cg_ath_change = coin_data.get("ath_change_percentage", 0) or 0
+
     return f"""
 === ANALISI PER {symbol} ===
+
+NOTA: Operiamo su Alpaca (spot trading, NO leva). Leverage sempre = 1.
 
 📊 PORTFOLIO:
 - Saldo USDC disponibile: ${portfolio.get('available_balance', 0):.2f}
 - Equity totale: ${portfolio.get('total_equity', 0):.2f}
-- Margine utilizzato: ${portfolio.get('margin_used', 0):.2f}
 - Esposizione corrente: {portfolio.get('exposure_pct', 0):.1f}%
 - Posizioni aperte:
 {positions_str}
@@ -228,7 +263,26 @@ def build_user_prompt(
 - Interpretazione: {whale_flow.get('interpretation', 'Dati non disponibili')}
 - Transazioni monitorate: {whale_flow.get('alert_count', 0)}
 
-Analizza tutti i dati sopra e fornisci la tua decisione di trading in formato JSON."""
+🦎 COINGECKO MARKET DATA:
+Mercato Globale:
+- BTC Dominance: {global_data.get('btc_dominance', 0):.1f}% (alto = risk-off, basso = altcoin season)
+- Total Market Cap: ${global_data.get('total_market_cap_usd', 0)/1e12:.2f}T
+- Market Cap Change 24h: {global_data.get('market_cap_change_24h_pct', 0):+.2f}%
+
+Trending Coins (top 7 più cercati):
+- {trending_str}
+- Nostre coin in trending: {tracked_trending_str}
+
+Dati {symbol} da CoinGecko:
+- Variazione 1h: {cg_price_change_1h:+.2f}%
+- Variazione 24h: {cg_price_change_24h:+.2f}%
+- Variazione 7d: {cg_price_change_7d:+.2f}%
+- Market Cap: ${cg_market_cap/1e9:.2f}B
+- Volume 24h: ${cg_volume/1e9:.2f}B
+- Distanza da ATH: {cg_ath_change:.1f}%
+
+Analizza tutti i dati sopra e fornisci la tua decisione di trading in formato JSON.
+RICORDA: leverage deve essere SEMPRE 1 (Alpaca non supporta leva)."""
 
 
 def get_decision_correction_prompt(error_message: str, original_response: str) -> str:
@@ -254,7 +308,7 @@ Per favore rispondi nuovamente con SOLO un JSON valido nel formato richiesto:
     "action": "open" | "close" | "hold",
     "symbol": "BTC" | "ETH" | "SOL",
     "direction": "long" | "short" | null,
-    "leverage": 1-{settings.MAX_LEVERAGE},
+    "leverage": 1,
     "position_size_pct": 1.0-5.0,
     "stop_loss_pct": 3.0,
     "take_profit_pct": 5.0,
@@ -262,4 +316,5 @@ Per favore rispondi nuovamente con SOLO un JSON valido nel formato richiesto:
     "reasoning": "..."
 }}
 
+IMPORTANTE: leverage deve essere SEMPRE 1 (Alpaca non supporta leva).
 NON includere testo aggiuntivo, SOLO il JSON."""

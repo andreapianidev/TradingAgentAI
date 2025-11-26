@@ -61,7 +61,8 @@ class DeepSeekClient:
         sentiment: Dict[str, Any],
         news: List[Dict[str, Any]],
         open_positions: List[Dict[str, Any]],
-        whale_flow: Dict[str, Any] = None
+        whale_flow: Dict[str, Any] = None,
+        coingecko: Dict[str, Any] = None
     ) -> Dict[str, Any]:
         """
         Get trading decision from DeepSeek LLM.
@@ -78,6 +79,7 @@ class DeepSeekClient:
             news: Recent news
             open_positions: Currently open positions
             whale_flow: Whale capital flow analysis
+            coingecko: CoinGecko market data (global, trending, coins)
 
         Returns:
             Decision dictionary with action, direction, leverage, etc.
@@ -96,7 +98,8 @@ class DeepSeekClient:
                 sentiment=sentiment,
                 news=news,
                 open_positions=open_positions,
-                whale_flow=whale_flow
+                whale_flow=whale_flow,
+                coingecko=coingecko
             )
 
             # Log the LLM request with prompts

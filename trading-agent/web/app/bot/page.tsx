@@ -22,15 +22,22 @@ import {
   Newspaper,
   Fish,
   Waves,
-  ExternalLink
+  ExternalLink,
+  Gauge,
+  LineChart,
+  ArrowUpDown,
+  Crosshair,
+  Zap,
+  BookOpen,
+  Globe
 } from 'lucide-react'
 import { cn, formatCurrency, formatPercent } from '@/lib/utils'
-import { supabase, TradingDecision, TradingPortfolioSnapshot } from '@/lib/supabase'
+import { supabase, TradingDecision, TradingPortfolioSnapshot, TradingMarketContext } from '@/lib/supabase'
 
 interface ActivityLog {
   id: string
   timestamp: string
-  type: 'decision' | 'market' | 'portfolio' | 'system' | 'news' | 'whale'
+  type: 'decision' | 'market' | 'portfolio' | 'system' | 'news' | 'whale' | 'sentiment' | 'global'
   level: 'info' | 'success' | 'warning' | 'error'
   symbol?: string
   action?: string
@@ -69,12 +76,35 @@ interface LiveAccountData {
   error?: string
 }
 
-type FilterType = 'all' | 'decision' | 'market' | 'portfolio' | 'news' | 'whale'
+interface DatabasePortfolioData {
+  totalEquity: number
+  availableBalance: number
+  investedValue: number
+  unrealizedPnl: number
+  exposurePct: number
+  positionsCount: number
+  dailyPnl: number
+  totalPnl: number
+  totalPnlPct: number
+  positions: Array<{
+    symbol: string
+    entryPrice: number
+    quantity: number
+    marketValue: number
+    unrealizedPnl: number
+    unrealizedPnlPct: number
+  }>
+}
+
+const INITIAL_CAPITAL = 100000
+
+type FilterType = 'all' | 'decision' | 'market' | 'portfolio' | 'news' | 'whale' | 'sentiment' | 'global'
 
 export default function BotConsolePage() {
   const [activities, setActivities] = useState<ActivityLog[]>([])
   const [latestSnapshot, setLatestSnapshot] = useState<TradingPortfolioSnapshot | null>(null)
   const [liveAccount, setLiveAccount] = useState<LiveAccountData | null>(null)
+  const [dbPortfolio, setDbPortfolio] = useState<DatabasePortfolioData | null>(null)
   const [loading, setLoading] = useState(true)
   const [autoScroll, setAutoScroll] = useState(true)
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set())
@@ -82,11 +112,84 @@ export default function BotConsolePage() {
   const logsEndRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
+  // Fetch portfolio data from database as fallback
+  const fetchDatabasePortfolio = async () => {
+    try {
+      // Get latest portfolio snapshot
+      const { data: snapshot } = await supabase
+        .from('trading_portfolio_snapshots')
+        .select('*')
+        .order('timestamp', { ascending: false })
+        .limit(1)
+        .single()
+
+      // Get open positions
+      const { data: openPositions } = await supabase
+        .from('trading_positions')
+        .select('*')
+        .eq('status', 'open')
+
+      if (snapshot) {
+        const equity = parseFloat(String(snapshot.total_equity_usdc)) || INITIAL_CAPITAL
+        const availableBalance = parseFloat(String(snapshot.available_balance_usdc)) || equity
+
+        // Calculate invested value and unrealized P&L from positions
+        let investedValue = 0
+        let unrealizedPnl = 0
+        const positionsData: DatabasePortfolioData['positions'] = []
+
+        if (openPositions) {
+          for (const pos of openPositions) {
+            const entryPrice = parseFloat(String(pos.entry_price)) || 0
+            const quantity = parseFloat(String(pos.quantity)) || 0
+            const posUnrealizedPnl = parseFloat(String(pos.unrealized_pnl)) || 0
+            const posUnrealizedPnlPct = parseFloat(String(pos.unrealized_pnl_pct)) || 0
+            const marketValue = entryPrice * quantity + posUnrealizedPnl
+
+            investedValue += entryPrice * quantity
+            unrealizedPnl += posUnrealizedPnl
+
+            positionsData.push({
+              symbol: pos.symbol,
+              entryPrice,
+              quantity,
+              marketValue,
+              unrealizedPnl: posUnrealizedPnl,
+              unrealizedPnlPct: posUnrealizedPnlPct,
+            })
+          }
+        }
+
+        const totalPnl = equity - INITIAL_CAPITAL
+        const totalPnlPct = (totalPnl / INITIAL_CAPITAL) * 100
+
+        setDbPortfolio({
+          totalEquity: equity,
+          availableBalance,
+          investedValue,
+          unrealizedPnl,
+          exposurePct: parseFloat(String(snapshot.exposure_pct)) || 0,
+          positionsCount: openPositions?.length || 0,
+          dailyPnl: parseFloat(String(snapshot.daily_pnl)) || 0,
+          totalPnl,
+          totalPnlPct,
+          positions: positionsData,
+        })
+      }
+    } catch (error) {
+      console.error('Error fetching database portfolio:', error)
+    }
+  }
+
   useEffect(() => {
     fetchActivityData()
     fetchLiveAccount()
+    fetchDatabasePortfolio()
     const activityInterval = setInterval(fetchActivityData, 5000) // Poll every 5 seconds
-    const liveInterval = setInterval(fetchLiveAccount, 10000) // Live data every 10 seconds
+    const liveInterval = setInterval(() => {
+      fetchLiveAccount()
+      fetchDatabasePortfolio()
+    }, 10000) // Live data every 10 seconds
     return () => {
       clearInterval(activityInterval)
       clearInterval(liveInterval)
@@ -109,7 +212,7 @@ export default function BotConsolePage() {
         .order('timestamp', { ascending: false })
         .limit(50)
 
-      // Fetch recent market contexts
+      // Fetch recent market contexts with ALL data
       const { data: markets } = await supabase
         .from('trading_market_contexts')
         .select('*')
@@ -136,6 +239,20 @@ export default function BotConsolePage() {
         .select('*')
         .order('created_at', { ascending: false })
         .limit(20)
+
+      // Fetch whale flow summaries
+      const { data: whaleFlows } = await supabase
+        .from('trading_whale_flow_summary')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10)
+
+      // Fetch CoinGecko global market data
+      const { data: globalMarket } = await supabase
+        .from('trading_market_global')
+        .select('*')
+        .order('timestamp', { ascending: false })
+        .limit(10)
 
       if (snapshots && snapshots.length > 0) {
         setLatestSnapshot(snapshots[0])
@@ -203,12 +320,25 @@ export default function BotConsolePage() {
         })
       })
 
-      // Add market contexts
+      // Add market contexts with FULL details
       markets?.forEach(m => {
-        // Use correct column names from trading_market_contexts table
         const forecast = m.forecast_trend || 'N/A'
         const rsi = m.rsi ? parseFloat(m.rsi).toFixed(1) : 'N/A'
         const price = m.price ? parseFloat(m.price) : 0
+        const macd = m.macd ? parseFloat(m.macd) : null
+        const macdSignal = m.macd_signal ? parseFloat(m.macd_signal) : null
+        const macdHistogram = m.macd_histogram ? parseFloat(m.macd_histogram) : null
+        const ema2 = m.ema2 ? parseFloat(m.ema2) : null
+        const ema20 = m.ema20 ? parseFloat(m.ema20) : null
+
+        // Determine trend from MACD
+        const macdTrend = macd !== null && macdSignal !== null
+          ? (macd > macdSignal ? 'BULLISH' : 'BEARISH')
+          : 'N/A'
+
+        // RSI interpretation
+        const rsiValue = m.rsi ? parseFloat(m.rsi) : 50
+        const rsiStatus = rsiValue > 70 ? '(OVERBOUGHT)' : rsiValue < 30 ? '(OVERSOLD)' : ''
 
         logs.push({
           id: `market-${m.id}`,
@@ -216,16 +346,67 @@ export default function BotConsolePage() {
           type: 'market',
           level: 'info',
           symbol: m.symbol,
-          message: `${m.symbol} Analysis: $${price.toLocaleString()} | RSI: ${rsi} | Forecast: ${forecast}`,
+          message: `${m.symbol} Analysis: $${price.toLocaleString()} | RSI: ${rsi}${rsiStatus} | MACD: ${macdTrend} | Forecast: ${forecast.toUpperCase()}`,
           details: {
+            // Price
             price: m.price,
             change_24h: m.price_change_24h,
+            // Technical Indicators
             rsi: m.rsi,
+            rsi_status: rsiStatus,
             macd: m.macd,
+            macd_signal: m.macd_signal,
+            macd_histogram: m.macd_histogram,
+            macd_trend: macdTrend,
+            ema2: m.ema2,
+            ema20: m.ema20,
+            price_vs_ema20: ema20 ? (price > ema20 ? 'ABOVE' : 'BELOW') : 'N/A',
+            // Pivot Points
+            pivot_pp: m.pivot_pp,
+            pivot_r1: m.pivot_r1,
+            pivot_r2: m.pivot_r2,
+            pivot_s1: m.pivot_s1,
+            pivot_s2: m.pivot_s2,
+            pivot_distance_pct: m.pivot_distance_pct,
+            // Forecast
             forecast_trend: m.forecast_trend,
-            forecast_target: m.forecast_target_price
+            forecast_target_price: m.forecast_target_price,
+            forecast_change_pct: m.forecast_change_pct,
+            forecast_confidence: m.forecast_confidence,
+            // Order Book
+            orderbook_bid_volume: m.orderbook_bid_volume,
+            orderbook_ask_volume: m.orderbook_ask_volume,
+            orderbook_ratio: m.orderbook_ratio,
+            // Sentiment
+            sentiment_label: m.sentiment_label,
+            sentiment_score: m.sentiment_score
           }
         })
+
+        // Add a separate sentiment log if sentiment data exists
+        if (m.sentiment_score !== null && m.sentiment_score !== undefined) {
+          const score = m.sentiment_score
+          const label = m.sentiment_label || 'NEUTRAL'
+          let interpretation = ''
+          if (score <= 25) interpretation = 'Extreme Fear - Potential buying opportunity'
+          else if (score <= 45) interpretation = 'Fear - Market uncertainty'
+          else if (score <= 55) interpretation = 'Neutral - Market indecision'
+          else if (score <= 75) interpretation = 'Greed - Market optimism'
+          else interpretation = 'Extreme Greed - Potential selling opportunity'
+
+          logs.push({
+            id: `sentiment-${m.id}`,
+            timestamp: m.timestamp,
+            type: 'sentiment',
+            level: score <= 25 || score >= 75 ? 'warning' : 'info',
+            message: `Fear & Greed Index: ${score} (${label}) - ${interpretation}`,
+            details: {
+              score,
+              label,
+              interpretation
+            }
+          })
+        }
       })
 
       // Add portfolio snapshots
@@ -239,9 +420,14 @@ export default function BotConsolePage() {
           details: {
             equity: s.total_equity_usdc,
             available: s.available_balance_usdc,
+            margin_used: s.margin_used_usdc,
             exposure: s.exposure_pct,
             daily_pnl: s.daily_pnl,
-            daily_pnl_pct: s.daily_pnl_pct
+            daily_pnl_pct: s.daily_pnl_pct,
+            total_pnl: s.total_pnl,
+            total_pnl_pct: s.total_pnl_pct,
+            open_positions_count: s.open_positions_count,
+            trading_mode: s.trading_mode
           }
         })
       })
@@ -286,6 +472,37 @@ export default function BotConsolePage() {
             to_type: w.to_type,
             flow_direction: w.flow_direction,
             tx_hash: w.tx_hash
+          }
+        })
+      })
+
+      // Add CoinGecko global market data
+      globalMarket?.forEach(g => {
+        const btcDom = g.btc_dominance ? parseFloat(g.btc_dominance) : 0
+        const mcapChange = g.market_cap_change_24h_pct ? parseFloat(g.market_cap_change_24h_pct) : 0
+        const totalMcap = g.total_market_cap_usd ? parseFloat(g.total_market_cap_usd) : 0
+        const trendingSymbols = g.trending_symbols || []
+        const trackedTrending = g.tracked_trending || []
+
+        const mcapTrend = mcapChange >= 0 ? '📈' : '📉'
+        const trendingStr = trendingSymbols.slice(0, 5).join(', ') || 'N/A'
+
+        logs.push({
+          id: `global-${g.id}`,
+          timestamp: g.timestamp || g.created_at,
+          type: 'global',
+          level: Math.abs(mcapChange) > 3 ? 'warning' : 'info',
+          message: `${mcapTrend} Market: BTC ${btcDom.toFixed(1)}% | MCap $${(totalMcap/1e12).toFixed(2)}T (${mcapChange >= 0 ? '+' : ''}${mcapChange.toFixed(2)}%) | Trending: ${trendingStr}`,
+          details: {
+            btc_dominance: btcDom,
+            eth_dominance: g.eth_dominance ? parseFloat(g.eth_dominance) : 0,
+            total_market_cap: totalMcap,
+            total_volume_24h: g.total_volume_24h_usd ? parseFloat(g.total_volume_24h_usd) : 0,
+            market_cap_change_24h: mcapChange,
+            active_cryptocurrencies: g.active_cryptocurrencies,
+            trending_coins: g.trending_coins || [],
+            trending_symbols: trendingSymbols,
+            tracked_trending: trackedTrending
           }
         })
       })
@@ -345,6 +562,10 @@ export default function BotConsolePage() {
         return <Newspaper className="w-4 h-4 text-orange-500" />
       case 'whale':
         return <Fish className="w-4 h-4 text-blue-400" />
+      case 'sentiment':
+        return <Gauge className="w-4 h-4 text-pink-500" />
+      case 'global':
+        return <Globe className="w-4 h-4 text-teal-500" />
       default:
         return <Terminal className="w-4 h-4 text-gray-500" />
     }
@@ -360,6 +581,8 @@ export default function BotConsolePage() {
       case 'portfolio': return 'text-yellow-400'
       case 'news': return 'text-orange-400'
       case 'whale': return 'text-blue-400'
+      case 'sentiment': return 'text-pink-400'
+      case 'global': return 'text-teal-400'
       default: return 'text-gray-400'
     }
   }
@@ -385,6 +608,282 @@ export default function BotConsolePage() {
     return a.type === filter
   })
 
+  // Render expanded market details with all indicators
+  const renderMarketDetails = (details: any) => {
+    return (
+      <div className="space-y-4">
+        {/* Price Section */}
+        <div className="bg-gray-200 dark:bg-gray-800 rounded-lg p-3">
+          <div className="flex items-center gap-2 mb-2">
+            <DollarSign className="w-4 h-4 text-green-500" />
+            <span className="text-xs font-semibold text-gray-500 uppercase">Price Data</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-gray-500">Current Price:</span>
+              <span className="text-gray-900 dark:text-white font-mono">${parseFloat(details.price || 0).toLocaleString()}</span>
+            </div>
+            {details.change_24h && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">24h Change:</span>
+                <span className={cn("font-mono", parseFloat(details.change_24h) >= 0 ? "text-green-500" : "text-red-500")}>
+                  {parseFloat(details.change_24h) >= 0 ? '+' : ''}{parseFloat(details.change_24h).toFixed(2)}%
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Technical Indicators */}
+        <div className="bg-gray-200 dark:bg-gray-800 rounded-lg p-3">
+          <div className="flex items-center gap-2 mb-2">
+            <LineChart className="w-4 h-4 text-cyan-500" />
+            <span className="text-xs font-semibold text-gray-500 uppercase">Technical Indicators</span>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
+            {/* RSI */}
+            <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+              <div className="text-xs text-gray-500">RSI (14)</div>
+              <div className={cn(
+                "text-lg font-bold",
+                parseFloat(details.rsi || 50) > 70 ? "text-red-500" :
+                parseFloat(details.rsi || 50) < 30 ? "text-green-500" : "text-gray-900 dark:text-white"
+              )}>
+                {details.rsi ? parseFloat(details.rsi).toFixed(1) : 'N/A'}
+              </div>
+              <div className="text-xs text-gray-500">{details.rsi_status}</div>
+            </div>
+
+            {/* MACD */}
+            <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+              <div className="text-xs text-gray-500">MACD</div>
+              <div className="text-lg font-bold text-gray-900 dark:text-white">
+                {details.macd ? parseFloat(details.macd).toFixed(4) : 'N/A'}
+              </div>
+              <div className={cn(
+                "text-xs",
+                details.macd_trend === 'BULLISH' ? "text-green-500" : "text-red-500"
+              )}>
+                {details.macd_trend}
+              </div>
+            </div>
+
+            {/* MACD Signal */}
+            <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+              <div className="text-xs text-gray-500">Signal Line</div>
+              <div className="text-lg font-bold text-gray-900 dark:text-white">
+                {details.macd_signal ? parseFloat(details.macd_signal).toFixed(4) : 'N/A'}
+              </div>
+            </div>
+
+            {/* MACD Histogram */}
+            <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+              <div className="text-xs text-gray-500">Histogram</div>
+              <div className={cn(
+                "text-lg font-bold",
+                parseFloat(details.macd_histogram || 0) >= 0 ? "text-green-500" : "text-red-500"
+              )}>
+                {details.macd_histogram ? parseFloat(details.macd_histogram).toFixed(4) : 'N/A'}
+              </div>
+            </div>
+
+            {/* EMA2 */}
+            <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+              <div className="text-xs text-gray-500">EMA (2)</div>
+              <div className="text-lg font-bold text-gray-900 dark:text-white font-mono">
+                ${details.ema2 ? parseFloat(details.ema2).toLocaleString(undefined, {maximumFractionDigits: 2}) : 'N/A'}
+              </div>
+            </div>
+
+            {/* EMA20 */}
+            <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+              <div className="text-xs text-gray-500">EMA (20)</div>
+              <div className="text-lg font-bold text-gray-900 dark:text-white font-mono">
+                ${details.ema20 ? parseFloat(details.ema20).toLocaleString(undefined, {maximumFractionDigits: 2}) : 'N/A'}
+              </div>
+              <div className={cn(
+                "text-xs",
+                details.price_vs_ema20 === 'ABOVE' ? "text-green-500" : "text-red-500"
+              )}>
+                Price {details.price_vs_ema20}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Pivot Points */}
+        {(details.pivot_pp || details.pivot_r1 || details.pivot_s1) && (
+          <div className="bg-gray-200 dark:bg-gray-800 rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Crosshair className="w-4 h-4 text-purple-500" />
+              <span className="text-xs font-semibold text-gray-500 uppercase">Pivot Points</span>
+            </div>
+            <div className="grid grid-cols-5 gap-2 text-sm text-center">
+              <div className="bg-red-500/10 p-2 rounded">
+                <div className="text-xs text-red-400">R2</div>
+                <div className="text-red-500 font-mono font-bold">
+                  ${details.pivot_r2 ? parseFloat(details.pivot_r2).toLocaleString() : '-'}
+                </div>
+              </div>
+              <div className="bg-red-500/5 p-2 rounded">
+                <div className="text-xs text-red-300">R1</div>
+                <div className="text-red-400 font-mono font-bold">
+                  ${details.pivot_r1 ? parseFloat(details.pivot_r1).toLocaleString() : '-'}
+                </div>
+              </div>
+              <div className="bg-purple-500/10 p-2 rounded">
+                <div className="text-xs text-purple-400">PP</div>
+                <div className="text-purple-500 font-mono font-bold">
+                  ${details.pivot_pp ? parseFloat(details.pivot_pp).toLocaleString() : '-'}
+                </div>
+              </div>
+              <div className="bg-green-500/5 p-2 rounded">
+                <div className="text-xs text-green-300">S1</div>
+                <div className="text-green-400 font-mono font-bold">
+                  ${details.pivot_s1 ? parseFloat(details.pivot_s1).toLocaleString() : '-'}
+                </div>
+              </div>
+              <div className="bg-green-500/10 p-2 rounded">
+                <div className="text-xs text-green-400">S2</div>
+                <div className="text-green-500 font-mono font-bold">
+                  ${details.pivot_s2 ? parseFloat(details.pivot_s2).toLocaleString() : '-'}
+                </div>
+              </div>
+            </div>
+            {details.pivot_distance_pct && (
+              <div className="text-center mt-2 text-xs text-gray-500">
+                Distance from PP: <span className="text-gray-900 dark:text-white">{parseFloat(details.pivot_distance_pct).toFixed(2)}%</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Forecast */}
+        {details.forecast_trend && (
+          <div className="bg-gray-200 dark:bg-gray-800 rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Zap className="w-4 h-4 text-yellow-500" />
+              <span className="text-xs font-semibold text-gray-500 uppercase">Prophet Forecast</span>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+              <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                <div className="text-xs text-gray-500">Trend</div>
+                <div className={cn(
+                  "text-lg font-bold uppercase",
+                  details.forecast_trend?.toLowerCase() === 'up' || details.forecast_trend?.toLowerCase() === 'bullish' ? "text-green-500" :
+                  details.forecast_trend?.toLowerCase() === 'down' || details.forecast_trend?.toLowerCase() === 'bearish' ? "text-red-500" : "text-gray-500"
+                )}>
+                  {details.forecast_trend?.toUpperCase() || 'N/A'}
+                </div>
+              </div>
+              <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                <div className="text-xs text-gray-500">Target Price</div>
+                <div className="text-lg font-bold text-gray-900 dark:text-white font-mono">
+                  ${details.forecast_target_price ? parseFloat(details.forecast_target_price).toLocaleString() : 'N/A'}
+                </div>
+              </div>
+              <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                <div className="text-xs text-gray-500">Expected Change</div>
+                <div className={cn(
+                  "text-lg font-bold",
+                  parseFloat(details.forecast_change_pct || 0) >= 0 ? "text-green-500" : "text-red-500"
+                )}>
+                  {details.forecast_change_pct ? `${parseFloat(details.forecast_change_pct) >= 0 ? '+' : ''}${parseFloat(details.forecast_change_pct).toFixed(2)}%` : 'N/A'}
+                </div>
+              </div>
+              <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                <div className="text-xs text-gray-500">Confidence</div>
+                <div className="text-lg font-bold text-gray-900 dark:text-white">
+                  {details.forecast_confidence ? `${(parseFloat(details.forecast_confidence) * 100).toFixed(0)}%` : 'N/A'}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Order Book */}
+        {(details.orderbook_bid_volume || details.orderbook_ask_volume) && (
+          <div className="bg-gray-200 dark:bg-gray-800 rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <BookOpen className="w-4 h-4 text-indigo-500" />
+              <span className="text-xs font-semibold text-gray-500 uppercase">Order Book</span>
+            </div>
+            <div className="grid grid-cols-3 gap-3 text-sm">
+              <div className="bg-green-500/10 p-2 rounded text-center">
+                <div className="text-xs text-green-400">Bid Volume</div>
+                <div className="text-lg font-bold text-green-500 font-mono">
+                  {details.orderbook_bid_volume ? parseFloat(details.orderbook_bid_volume).toLocaleString(undefined, {maximumFractionDigits: 2}) : 'N/A'}
+                </div>
+              </div>
+              <div className="bg-red-500/10 p-2 rounded text-center">
+                <div className="text-xs text-red-400">Ask Volume</div>
+                <div className="text-lg font-bold text-red-500 font-mono">
+                  {details.orderbook_ask_volume ? parseFloat(details.orderbook_ask_volume).toLocaleString(undefined, {maximumFractionDigits: 2}) : 'N/A'}
+                </div>
+              </div>
+              <div className={cn(
+                "p-2 rounded text-center",
+                parseFloat(details.orderbook_ratio || 1) > 1 ? "bg-green-500/10" : "bg-red-500/10"
+              )}>
+                <div className="text-xs text-gray-500">Bid/Ask Ratio</div>
+                <div className={cn(
+                  "text-lg font-bold",
+                  parseFloat(details.orderbook_ratio || 1) > 1 ? "text-green-500" : "text-red-500"
+                )}>
+                  {details.orderbook_ratio ? parseFloat(details.orderbook_ratio).toFixed(2) : 'N/A'}
+                </div>
+                <div className="text-xs text-gray-500">
+                  {parseFloat(details.orderbook_ratio || 1) > 1.2 ? 'Buying Pressure' :
+                   parseFloat(details.orderbook_ratio || 1) < 0.8 ? 'Selling Pressure' : 'Balanced'}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Sentiment */}
+        {details.sentiment_score !== null && details.sentiment_score !== undefined && (
+          <div className="bg-gray-200 dark:bg-gray-800 rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Gauge className="w-4 h-4 text-pink-500" />
+              <span className="text-xs font-semibold text-gray-500 uppercase">Market Sentiment</span>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className={cn(
+                "text-3xl font-bold",
+                details.sentiment_score <= 25 ? "text-red-500" :
+                details.sentiment_score <= 45 ? "text-orange-500" :
+                details.sentiment_score <= 55 ? "text-gray-500" :
+                details.sentiment_score <= 75 ? "text-lime-500" : "text-green-500"
+              )}>
+                {details.sentiment_score}
+              </div>
+              <div>
+                <div className={cn(
+                  "font-semibold",
+                  details.sentiment_score <= 25 ? "text-red-500" :
+                  details.sentiment_score <= 45 ? "text-orange-500" :
+                  details.sentiment_score <= 55 ? "text-gray-500" :
+                  details.sentiment_score <= 75 ? "text-lime-500" : "text-green-500"
+                )}>
+                  {details.sentiment_label || 'NEUTRAL'}
+                </div>
+                <div className="text-xs text-gray-500">Fear & Greed Index</div>
+              </div>
+              {/* Sentiment Bar */}
+              <div className="flex-1 h-2 bg-gradient-to-r from-red-500 via-yellow-500 to-green-500 rounded-full relative">
+                <div
+                  className="absolute w-3 h-3 bg-white border-2 border-gray-800 rounded-full -top-0.5 transform -translate-x-1/2"
+                  style={{ left: `${details.sentiment_score}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
@@ -402,7 +901,7 @@ export default function BotConsolePage() {
         <div className="flex items-center gap-2">
           {/* Filter */}
           <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 overflow-x-auto">
-            {(['all', 'decision', 'market', 'portfolio', 'news', 'whale'] as FilterType[]).map(f => (
+            {(['all', 'decision', 'market', 'portfolio', 'news', 'whale', 'sentiment', 'global'] as FilterType[]).map(f => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -450,46 +949,58 @@ export default function BotConsolePage() {
       </div>
 
       {/* Live Portfolio Status Bar */}
-      {(liveAccount?.account || latestSnapshot) && (
+      {(liveAccount?.account || dbPortfolio || latestSnapshot) && (
         <div className="border-b border-gray-200 dark:border-gray-800">
           {/* Main Portfolio Value */}
           <div className="p-4 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-900/50 dark:to-gray-800/30">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-center gap-4">
-                <div className="p-3 bg-green-500/10 rounded-xl">
-                  <DollarSign className="w-8 h-8 text-green-500" />
+                <div className={cn(
+                  "p-3 rounded-xl",
+                  (dbPortfolio?.totalPnl ?? 0) >= 0 ? "bg-green-500/10" : "bg-red-500/10"
+                )}>
+                  <DollarSign className={cn(
+                    "w-8 h-8",
+                    (dbPortfolio?.totalPnl ?? 0) >= 0 ? "text-green-500" : "text-red-500"
+                  )} />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-gray-500 uppercase tracking-wide">Portfolio Value</span>
-                    {liveAccount?.configured && (
+                    {liveAccount?.configured && liveAccount?.success && (
                       <span className="flex items-center gap-1 px-1.5 py-0.5 bg-green-500/10 text-green-500 text-xs rounded">
                         <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
                         LIVE
                       </span>
                     )}
-                    {liveAccount?.mode === 'paper' && (
+                    {!liveAccount?.success && dbPortfolio && (
+                      <span className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-500/10 text-blue-500 text-xs rounded">
+                        DB
+                      </span>
+                    )}
+                    {(liveAccount?.mode === 'paper' || (!liveAccount?.success && dbPortfolio)) && (
                       <span className="px-1.5 py-0.5 bg-yellow-500/10 text-yellow-600 text-xs rounded">
                         PAPER
                       </span>
                     )}
                   </div>
                   <div className="text-3xl font-bold text-gray-900 dark:text-white">
-                    {formatCurrency(liveAccount?.account?.equity ?? Number(latestSnapshot?.total_equity_usdc) ?? 0)}
+                    {formatCurrency(liveAccount?.account?.equity ?? dbPortfolio?.totalEquity ?? Number(latestSnapshot?.total_equity_usdc) ?? INITIAL_CAPITAL)}
                   </div>
-                  {liveAccount?.account && (
+                  {/* Show Total P&L from initial capital */}
+                  {(liveAccount?.account || dbPortfolio) && (
                     <div className={cn(
                       "flex items-center gap-1 text-sm font-medium",
-                      liveAccount.account.dailyPnl >= 0 ? "text-green-500" : "text-red-500"
+                      (dbPortfolio?.totalPnl ?? liveAccount?.account?.dailyPnl ?? 0) >= 0 ? "text-green-500" : "text-red-500"
                     )}>
-                      {liveAccount.account.dailyPnl >= 0 ? (
+                      {(dbPortfolio?.totalPnl ?? liveAccount?.account?.dailyPnl ?? 0) >= 0 ? (
                         <TrendingUp className="w-4 h-4" />
                       ) : (
                         <TrendingDown className="w-4 h-4" />
                       )}
-                      <span>{liveAccount.account.dailyPnl >= 0 ? '+' : ''}{formatCurrency(liveAccount.account.dailyPnl)}</span>
-                      <span className="text-gray-500">({liveAccount.account.dailyPnlPct >= 0 ? '+' : ''}{liveAccount.account.dailyPnlPct.toFixed(2)}%)</span>
-                      <span className="text-xs text-gray-400 ml-1">today</span>
+                      <span>{(dbPortfolio?.totalPnl ?? 0) >= 0 ? '+' : ''}{formatCurrency(dbPortfolio?.totalPnl ?? liveAccount?.account?.dailyPnl ?? 0)}</span>
+                      <span className="text-gray-500">({(dbPortfolio?.totalPnlPct ?? liveAccount?.account?.dailyPnlPct ?? 0) >= 0 ? '+' : ''}{(dbPortfolio?.totalPnlPct ?? liveAccount?.account?.dailyPnlPct ?? 0).toFixed(2)}%)</span>
+                      <span className="text-xs text-gray-400 ml-1">total</span>
                     </div>
                   )}
                 </div>
@@ -509,7 +1020,7 @@ export default function BotConsolePage() {
               <div>
                 <div className="text-xs text-gray-500">Cash</div>
                 <div className="font-bold text-gray-900 dark:text-white">
-                  {formatCurrency(liveAccount?.account?.cash ?? Number(latestSnapshot?.available_balance_usdc) ?? 0)}
+                  {formatCurrency(liveAccount?.account?.cash ?? dbPortfolio?.availableBalance ?? Number(latestSnapshot?.available_balance_usdc) ?? 0)}
                 </div>
               </div>
             </div>
@@ -518,12 +1029,12 @@ export default function BotConsolePage() {
               <div>
                 <div className="text-xs text-gray-500">Invested</div>
                 <div className="font-bold text-gray-900 dark:text-white">
-                  {formatCurrency(liveAccount?.account?.positionsValue ?? 0)}
+                  {formatCurrency(liveAccount?.account?.positionsValue ?? dbPortfolio?.investedValue ?? 0)}
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-3">
-              {(liveAccount?.account?.totalUnrealizedPnl ?? 0) >= 0 ? (
+              {(liveAccount?.account?.totalUnrealizedPnl ?? dbPortfolio?.unrealizedPnl ?? 0) >= 0 ? (
                 <TrendingUp className="w-5 h-5 text-green-500" />
               ) : (
                 <TrendingDown className="w-5 h-5 text-red-500" />
@@ -532,9 +1043,9 @@ export default function BotConsolePage() {
                 <div className="text-xs text-gray-500">Unrealized P&L</div>
                 <div className={cn(
                   "font-bold",
-                  (liveAccount?.account?.totalUnrealizedPnl ?? 0) >= 0 ? "text-green-500" : "text-red-500"
+                  (liveAccount?.account?.totalUnrealizedPnl ?? dbPortfolio?.unrealizedPnl ?? 0) >= 0 ? "text-green-500" : "text-red-500"
                 )}>
-                  {(liveAccount?.account?.totalUnrealizedPnl ?? 0) >= 0 ? '+' : ''}{formatCurrency(liveAccount?.account?.totalUnrealizedPnl ?? 0)}
+                  {(liveAccount?.account?.totalUnrealizedPnl ?? dbPortfolio?.unrealizedPnl ?? 0) >= 0 ? '+' : ''}{formatCurrency(liveAccount?.account?.totalUnrealizedPnl ?? dbPortfolio?.unrealizedPnl ?? 0)}
                 </div>
               </div>
             </div>
@@ -543,7 +1054,7 @@ export default function BotConsolePage() {
               <div>
                 <div className="text-xs text-gray-500">Exposure</div>
                 <div className="font-bold text-gray-900 dark:text-white">
-                  {(liveAccount?.account?.exposurePct ?? Number(latestSnapshot?.exposure_pct) ?? 0).toFixed(1)}%
+                  {(liveAccount?.account?.exposurePct ?? dbPortfolio?.exposurePct ?? Number(latestSnapshot?.exposure_pct) ?? 0).toFixed(1)}%
                 </div>
               </div>
             </div>
@@ -552,18 +1063,18 @@ export default function BotConsolePage() {
               <div>
                 <div className="text-xs text-gray-500">Positions</div>
                 <div className="font-bold text-gray-900 dark:text-white">
-                  {liveAccount?.account?.positionsCount ?? latestSnapshot?.open_positions_count ?? 0}
+                  {liveAccount?.account?.positionsCount ?? dbPortfolio?.positionsCount ?? latestSnapshot?.open_positions_count ?? 0}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Open Positions Detail */}
-          {liveAccount?.positions && liveAccount.positions.length > 0 && (
+          {/* Open Positions Detail - show from live API or database */}
+          {((liveAccount?.positions && liveAccount.positions.length > 0) || (dbPortfolio?.positions && dbPortfolio.positions.length > 0)) && (
             <div className="px-4 pb-4 bg-gray-50/50 dark:bg-gray-900/30">
               <div className="text-xs text-gray-500 mb-2 uppercase tracking-wide">Open Positions</div>
               <div className="flex flex-wrap gap-2">
-                {liveAccount.positions.map(pos => (
+                {(liveAccount?.positions || dbPortfolio?.positions || []).map(pos => (
                   <div
                     key={pos.symbol}
                     className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
@@ -650,7 +1161,9 @@ export default function BotConsolePage() {
                         log.type === 'market' && 'bg-cyan-500/10 text-cyan-400',
                         log.type === 'portfolio' && 'bg-yellow-500/10 text-yellow-400',
                         log.type === 'news' && 'bg-orange-500/10 text-orange-400',
-                        log.type === 'whale' && 'bg-blue-500/10 text-blue-400'
+                        log.type === 'whale' && 'bg-blue-500/10 text-blue-400',
+                        log.type === 'sentiment' && 'bg-pink-500/10 text-pink-400',
+                        log.type === 'global' && 'bg-teal-500/10 text-teal-400'
                       )}>
                         {log.type}
                       </span>
@@ -761,12 +1274,108 @@ export default function BotConsolePage() {
                             )}
                           </>
                         )}
+                        {log.type === 'market' && renderMarketDetails(log.details)}
+                        {log.type === 'sentiment' && (
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-4">
+                              <div className={cn(
+                                "text-4xl font-bold",
+                                log.details.score <= 25 ? "text-red-500" :
+                                log.details.score <= 45 ? "text-orange-500" :
+                                log.details.score <= 55 ? "text-gray-500" :
+                                log.details.score <= 75 ? "text-lime-500" : "text-green-500"
+                              )}>
+                                {log.details.score}
+                              </div>
+                              <div>
+                                <div className={cn(
+                                  "text-lg font-semibold",
+                                  log.details.score <= 25 ? "text-red-500" :
+                                  log.details.score <= 45 ? "text-orange-500" :
+                                  log.details.score <= 55 ? "text-gray-500" :
+                                  log.details.score <= 75 ? "text-lime-500" : "text-green-500"
+                                )}>
+                                  {log.details.label}
+                                </div>
+                                <div className="text-sm text-gray-500">{log.details.interpretation}</div>
+                              </div>
+                            </div>
+                            {/* Sentiment Bar */}
+                            <div className="mt-3">
+                              <div className="h-3 bg-gradient-to-r from-red-500 via-yellow-500 to-green-500 rounded-full relative">
+                                <div
+                                  className="absolute w-4 h-4 bg-white border-2 border-gray-800 rounded-full -top-0.5 transform -translate-x-1/2 shadow"
+                                  style={{ left: `${log.details.score}%` }}
+                                />
+                              </div>
+                              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                                <span>Extreme Fear</span>
+                                <span>Neutral</span>
+                                <span>Extreme Greed</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {log.type === 'portfolio' && (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+                            <div className="bg-gray-200 dark:bg-gray-800 p-2 rounded">
+                              <div className="text-xs text-gray-500">Total Equity</div>
+                              <div className="text-lg font-bold text-gray-900 dark:text-white">
+                                {formatCurrency(parseFloat(log.details.equity || 0))}
+                              </div>
+                            </div>
+                            <div className="bg-gray-200 dark:bg-gray-800 p-2 rounded">
+                              <div className="text-xs text-gray-500">Available Cash</div>
+                              <div className="text-lg font-bold text-gray-900 dark:text-white">
+                                {formatCurrency(parseFloat(log.details.available || 0))}
+                              </div>
+                            </div>
+                            <div className="bg-gray-200 dark:bg-gray-800 p-2 rounded">
+                              <div className="text-xs text-gray-500">Margin Used</div>
+                              <div className="text-lg font-bold text-gray-900 dark:text-white">
+                                {formatCurrency(parseFloat(log.details.margin_used || 0))}
+                              </div>
+                            </div>
+                            <div className="bg-gray-200 dark:bg-gray-800 p-2 rounded">
+                              <div className="text-xs text-gray-500">Exposure</div>
+                              <div className="text-lg font-bold text-gray-900 dark:text-white">
+                                {parseFloat(log.details.exposure || 0).toFixed(1)}%
+                              </div>
+                            </div>
+                            {log.details.daily_pnl !== undefined && (
+                              <div className="bg-gray-200 dark:bg-gray-800 p-2 rounded">
+                                <div className="text-xs text-gray-500">Daily P&L</div>
+                                <div className={cn(
+                                  "text-lg font-bold",
+                                  parseFloat(log.details.daily_pnl || 0) >= 0 ? "text-green-500" : "text-red-500"
+                                )}>
+                                  {parseFloat(log.details.daily_pnl || 0) >= 0 ? '+' : ''}{formatCurrency(parseFloat(log.details.daily_pnl || 0))}
+                                </div>
+                              </div>
+                            )}
+                            <div className="bg-gray-200 dark:bg-gray-800 p-2 rounded">
+                              <div className="text-xs text-gray-500">Positions</div>
+                              <div className="text-lg font-bold text-gray-900 dark:text-white">
+                                {log.details.open_positions_count || 0}
+                              </div>
+                            </div>
+                          </div>
+                        )}
                         {log.type === 'news' && log.details.summary && (
                           <div className="mb-3">
                             <div className="text-xs text-gray-500 mb-1">Summary:</div>
                             <p className="text-sm text-gray-700 dark:text-gray-300">{log.details.summary}</p>
                             {log.details.source && (
                               <p className="text-xs text-gray-500 mt-2">Source: {log.details.source}</p>
+                            )}
+                            {log.details.symbols && log.details.symbols.length > 0 && (
+                              <div className="flex gap-1 mt-2">
+                                {log.details.symbols.map((s: string) => (
+                                  <span key={s} className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-800 rounded text-xs">
+                                    {s}
+                                  </span>
+                                ))}
+                              </div>
                             )}
                           </div>
                         )}
@@ -775,7 +1384,13 @@ export default function BotConsolePage() {
                             <div className="text-xs text-gray-500">Transaction Details:</div>
                             <div className="grid grid-cols-2 gap-2 text-sm">
                               <div className="text-gray-600 dark:text-gray-400">Amount:</div>
-                              <div className="text-gray-900 dark:text-white">${log.details.amount_usd?.toLocaleString()}</div>
+                              <div className="text-gray-900 dark:text-white font-mono">${log.details.amount_usd?.toLocaleString()}</div>
+                              {log.details.amount && (
+                                <>
+                                  <div className="text-gray-600 dark:text-gray-400">Crypto Amount:</div>
+                                  <div className="text-gray-900 dark:text-white font-mono">{parseFloat(log.details.amount).toLocaleString()}</div>
+                                </>
+                              )}
                               <div className="text-gray-600 dark:text-gray-400">From:</div>
                               <div className="text-gray-900 dark:text-white">{log.details.from_type || 'Unknown'}</div>
                               <div className="text-gray-600 dark:text-gray-400">To:</div>
@@ -788,13 +1403,111 @@ export default function BotConsolePage() {
                                 {log.details.flow_direction === 'inflow' ? '→ Exchange (Sell pressure)' :
                                  log.details.flow_direction === 'outflow' ? '← Exchange (Buy pressure)' : 'Transfer'}
                               </div>
+                              {log.details.blockchain && (
+                                <>
+                                  <div className="text-gray-600 dark:text-gray-400">Blockchain:</div>
+                                  <div className="text-gray-900 dark:text-white">{log.details.blockchain}</div>
+                                </>
+                              )}
+                              {log.details.tx_hash && (
+                                <>
+                                  <div className="text-gray-600 dark:text-gray-400">TX Hash:</div>
+                                  <div className="text-gray-900 dark:text-white font-mono text-xs truncate">{log.details.tx_hash}</div>
+                                </>
+                              )}
                             </div>
                           </div>
                         )}
-                        {log.type !== 'news' && log.type !== 'whale' && (
-                          <pre className="text-xs text-gray-500 dark:text-gray-400 whitespace-pre-wrap overflow-x-auto">
-                            {JSON.stringify(log.details, null, 2)}
-                          </pre>
+                        {log.type === 'global' && (
+                          <div className="space-y-4">
+                            {/* Market Overview */}
+                            <div className="bg-gray-200 dark:bg-gray-800 rounded-lg p-3">
+                              <div className="flex items-center gap-2 mb-2">
+                                <Globe className="w-4 h-4 text-teal-500" />
+                                <span className="text-xs font-semibold text-gray-500 uppercase">Global Market Overview</span>
+                              </div>
+                              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+                                <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                                  <div className="text-xs text-gray-500">BTC Dominance</div>
+                                  <div className="text-lg font-bold text-orange-500">
+                                    {log.details.btc_dominance?.toFixed(1) || 'N/A'}%
+                                  </div>
+                                </div>
+                                <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                                  <div className="text-xs text-gray-500">ETH Dominance</div>
+                                  <div className="text-lg font-bold text-blue-500">
+                                    {log.details.eth_dominance?.toFixed(1) || 'N/A'}%
+                                  </div>
+                                </div>
+                                <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                                  <div className="text-xs text-gray-500">Total Market Cap</div>
+                                  <div className="text-lg font-bold text-gray-900 dark:text-white">
+                                    ${log.details.total_market_cap ? (log.details.total_market_cap / 1e12).toFixed(2) : '0'}T
+                                  </div>
+                                </div>
+                                <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                                  <div className="text-xs text-gray-500">24h Change</div>
+                                  <div className={cn(
+                                    "text-lg font-bold",
+                                    (log.details.market_cap_change_24h || 0) >= 0 ? "text-green-500" : "text-red-500"
+                                  )}>
+                                    {(log.details.market_cap_change_24h || 0) >= 0 ? '+' : ''}{log.details.market_cap_change_24h?.toFixed(2) || '0'}%
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* 24h Volume */}
+                            <div className="bg-gray-200 dark:bg-gray-800 rounded-lg p-3">
+                              <div className="flex items-center gap-2 mb-2">
+                                <BarChart3 className="w-4 h-4 text-purple-500" />
+                                <span className="text-xs font-semibold text-gray-500 uppercase">Trading Volume</span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-3 text-sm">
+                                <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                                  <div className="text-xs text-gray-500">24h Volume</div>
+                                  <div className="text-lg font-bold text-gray-900 dark:text-white">
+                                    ${log.details.total_volume_24h ? (log.details.total_volume_24h / 1e9).toFixed(1) : '0'}B
+                                  </div>
+                                </div>
+                                <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                                  <div className="text-xs text-gray-500">Active Cryptos</div>
+                                  <div className="text-lg font-bold text-gray-900 dark:text-white">
+                                    {log.details.active_cryptocurrencies?.toLocaleString() || 'N/A'}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Trending Coins */}
+                            {log.details.trending_coins && log.details.trending_coins.length > 0 && (
+                              <div className="bg-gray-200 dark:bg-gray-800 rounded-lg p-3">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <TrendingUp className="w-4 h-4 text-green-500" />
+                                  <span className="text-xs font-semibold text-gray-500 uppercase">Trending Coins (24h)</span>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  {log.details.trending_coins.slice(0, 7).map((coin: any, idx: number) => (
+                                    <div
+                                      key={coin.id || idx}
+                                      className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-900 rounded-lg"
+                                    >
+                                      <span className="text-xs text-gray-500">#{coin.rank || idx + 1}</span>
+                                      <span className="font-semibold text-gray-900 dark:text-white">{coin.symbol || coin.name}</span>
+                                      {coin.market_cap_rank && (
+                                        <span className="text-xs text-gray-500">MCap #{coin.market_cap_rank}</span>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                                {log.details.tracked_trending && log.details.tracked_trending.length > 0 && (
+                                  <div className="mt-2 text-xs text-yellow-500">
+                                    Your tracked coins trending: {log.details.tracked_trending.join(', ')}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     )}
@@ -826,6 +1539,12 @@ export default function BotConsolePage() {
           </span>
           <span className="hidden sm:flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-blue-400" /> {activities.filter(a => a.type === 'whale').length}
+          </span>
+          <span className="hidden sm:flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-pink-500" /> {activities.filter(a => a.type === 'sentiment').length}
+          </span>
+          <span className="hidden sm:flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-teal-500" /> {activities.filter(a => a.type === 'global').length}
           </span>
         </div>
         <button
