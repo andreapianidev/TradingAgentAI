@@ -128,23 +128,39 @@ class AlpacaClient:
 
     def _retry_request(self, func, *args, **kwargs) -> Any:
         """Execute a request with retry logic."""
+        last_error = None
         for attempt in range(MAX_RETRIES):
             try:
                 return func(*args, **kwargs)
             except Exception as e:
+                last_error = e
                 error_str = str(e).lower()
-                if "rate" in error_str or "limit" in error_str:
+                logger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES} failed: {e}")
+
+                # Check for specific retryable errors
+                is_rate_limit = "rate limit" in error_str or "too many requests" in error_str or "429" in error_str
+                is_network_error = "network" in error_str or "connection" in error_str or "timeout" in error_str
+                is_temporary = "temporarily" in error_str or "try again" in error_str or "service unavailable" in error_str
+
+                if is_rate_limit:
                     wait_time = RETRY_DELAY_BASE ** (attempt + 1)
-                    logger.warning(f"Rate limit exceeded, waiting {wait_time}s...")
+                    logger.warning(f"Rate limit hit, waiting {wait_time}s...")
                     time.sleep(wait_time)
-                elif "network" in error_str or "connection" in error_str:
+                elif is_network_error or is_temporary:
                     wait_time = RETRY_DELAY_BASE ** (attempt + 1)
-                    logger.warning(f"Network error: {e}, retrying in {wait_time}s...")
+                    logger.warning(f"Temporary error, retrying in {wait_time}s...")
                     time.sleep(wait_time)
                 else:
+                    # For other errors (insufficient funds, invalid order, etc.),
+                    # log the full error and re-raise immediately (no retry)
+                    logger.error(f"Non-retryable error: {e}")
                     log_error_with_context(e, "AlpacaClient._retry_request")
                     raise
-        raise Exception(f"Max retries ({MAX_RETRIES}) exceeded")
+
+        # If we get here, all retries failed - include the original error
+        error_msg = f"Max retries ({MAX_RETRIES}) exceeded. Last error: {last_error}"
+        logger.error(error_msg)
+        raise Exception(error_msg)
 
     def fetch_ticker(self, symbol: str) -> Dict[str, Any]:
         """
@@ -557,14 +573,17 @@ class AlpacaClient:
             from alpaca.trading.enums import OrderSide, TimeInForce
 
             alpaca_symbol = self._get_symbol(symbol)
+            logger.info(f"Opening {direction} position for {symbol} (Alpaca: {alpaca_symbol})")
 
             # Get current portfolio
             portfolio = self.fetch_portfolio()
             available = portfolio.get("available_balance", 0)
+            logger.info(f"Available balance: ${available:,.2f}")
 
             # Get current price
             ticker = self.fetch_ticker(symbol)
             current_price = ticker.get("price", 0)
+            logger.info(f"Current price for {symbol}: ${current_price:,.2f}")
 
             if current_price <= 0:
                 raise ValueError(f"Invalid price for {symbol}: {current_price}")
@@ -574,6 +593,8 @@ class AlpacaClient:
             # due to price fluctuations between fetch and order execution
             position_value = available * (size_pct / 100) * 0.99
             quantity = position_value / current_price
+
+            logger.info(f"Order details: size_pct={size_pct}%, position_value=${position_value:,.2f}, quantity={quantity:.6f}")
 
             # Determine order side
             side = OrderSide.BUY if direction == "long" else OrderSide.SELL
@@ -586,6 +607,7 @@ class AlpacaClient:
                 time_in_force=TimeInForce.GTC
             )
 
+            logger.info(f"Submitting order: {side} {quantity:.6f} {alpaca_symbol}")
             order = self._retry_request(self.trading_client.submit_order, order_request)
 
             # Wait for fill
