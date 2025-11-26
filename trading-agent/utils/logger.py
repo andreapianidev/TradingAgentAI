@@ -94,12 +94,17 @@ class SupabaseHandler(logging.Handler):
             return
 
         try:
-            # Extract component name from logger name
+            # Extract component name from logger name (truncate to 50 chars for DB constraint)
             component = record.name.replace("trading_agent.", "") if record.name else "main"
+            component = component[:50] if len(component) > 50 else component
+
+            # Use levelno to get clean level name (avoids ANSI codes from ColoredFormatter)
+            level_names = {10: 'DEBUG', 20: 'INFO', 30: 'WARNING', 40: 'ERROR', 50: 'CRITICAL'}
+            log_level = level_names.get(record.levelno, 'INFO')
 
             # Build log data
             log_data = {
-                "log_level": record.levelname,
+                "log_level": log_level,
                 "message": record.getMessage(),
                 "component": component,
                 "cycle_id": get_cycle_id(),
