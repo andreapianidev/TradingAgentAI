@@ -24,6 +24,7 @@ from data.cache_manager import cache_manager
 from core.llm_client import llm_client
 from core.decision_validator import decision_validator
 from core.risk_manager import risk_manager
+from core.cost_tracker import cost_tracker
 
 from database.operations import db_ops
 
@@ -99,6 +100,9 @@ class TradingAgent:
         logger.info(f"Starting Trading Cycle at {cycle_start.isoformat()}")
         logger.info("=" * 50)
 
+        # Reset cost tracker for new cycle
+        cost_tracker.reset()
+
         results = {
             "success": True,
             "timestamp": cycle_start.isoformat(),
@@ -145,13 +149,27 @@ class TradingAgent:
         logger.info(f"  Fear & Greed Index: {sentiment.get('score', 'N/A')} ({sentiment.get('label', 'N/A')})")
         logger.info(f"  Interpretation: {sentiment.get('interpretation', 'N/A')}")
 
-        # Log news feed results
+        # Log news feed results with detailed breakdown
         logger.info("-" * 50)
         logger.info(f"NEWS FEED ({len(news)} articles):")
         if news:
+            # Sentiment breakdown
+            positive_count = sum(1 for n in news if n.get("sentiment") == "positive")
+            negative_count = sum(1 for n in news if n.get("sentiment") == "negative")
+            neutral_count = sum(1 for n in news if n.get("sentiment") == "neutral")
+            logger.info(f"  Sentiment breakdown: {positive_count} positive, {negative_count} negative, {neutral_count} neutral")
+            logger.info("")
+
             for i, article in enumerate(news[:5], 1):  # Show top 5
-                sentiment_emoji = {"positive": "+", "negative": "-", "neutral": "~"}.get(article.get("sentiment", "neutral"), "~")
-                logger.info(f"  [{sentiment_emoji}] {article.get('title', 'N/A')[:80]}")
+                sentiment_emoji = {"positive": "[+]", "negative": "[-]", "neutral": "[~]"}.get(article.get("sentiment", "neutral"), "[~]")
+                source = article.get("source", "Unknown")
+                pub_date = article.get("published_at", "")[:16] if article.get("published_at") else "N/A"
+                title = article.get("title", "N/A")[:70]
+                logger.info(f"  {i}. {sentiment_emoji} {title}")
+                logger.info(f"     Source: {source} | Date: {pub_date}")
+                if article.get("summary"):
+                    summary = article.get("summary", "")[:100]
+                    logger.info(f"     Summary: {summary}...")
         else:
             logger.info("  No relevant news found")
 
@@ -233,9 +251,14 @@ class TradingAgent:
             logger.info(f"    {pos.get('symbol')}: {pos.get('direction')} @ ${pos.get('entry_price', 0):.2f} | "
                        f"P&L: ${pnl:.2f} ({pnl_pct:+.2f}%)")
 
+        # Log cycle costs
+        cost_tracker.log_summary()
+        cost_summary = cost_tracker.get_summary()
+
         logger.info("=" * 50)
 
         results["duration_seconds"] = duration
+        results["costs"] = cost_summary
 
         return results
 
@@ -357,7 +380,7 @@ class TradingAgent:
 
         # 8. Get LLM decision
         logger.info("Requesting LLM decision...")
-        decision = llm_client.get_trading_decision(
+        decision, llm_usage = llm_client.get_trading_decision(
             symbol=symbol,
             portfolio=portfolio,
             market_data=market_data,
@@ -371,6 +394,26 @@ class TradingAgent:
             whale_flow=whale_flow,
             coingecko=coingecko
         )
+
+        # Track LLM cost
+        if llm_usage and llm_usage.get("cost_usd", 0) > 0:
+            cost_tracker.add_llm_cost(
+                symbol=symbol,
+                input_tokens=llm_usage.get("input_tokens", 0),
+                output_tokens=llm_usage.get("output_tokens", 0),
+                cached_tokens=llm_usage.get("cached_tokens", 0)
+            )
+            # Save LLM cost to database
+            try:
+                db_ops.save_llm_cost(
+                    symbol=symbol,
+                    input_tokens=llm_usage.get("input_tokens", 0),
+                    output_tokens=llm_usage.get("output_tokens", 0),
+                    cost_usd=llm_usage.get("cost_usd", 0),
+                    cached_tokens=llm_usage.get("cached_tokens", 0)
+                )
+            except Exception as e:
+                logger.debug(f"Error saving LLM cost: {e}")
 
         action = decision.get("action", ACTION_HOLD)
         confidence = decision.get("confidence", 0)
@@ -630,7 +673,7 @@ class TradingAgent:
                 }
 
                 # Generate analysis using LLM
-                analysis = llm_client.generate_market_analysis(
+                analysis, llm_usage = llm_client.generate_market_analysis(
                     symbol=symbol,
                     price=price,
                     indicators=indicators,
@@ -640,6 +683,25 @@ class TradingAgent:
                     news=news,
                     whale_flow=whale_flow
                 )
+
+                # Track LLM cost for analysis
+                if llm_usage and llm_usage.get("cost_usd", 0) > 0:
+                    cost_tracker.add_llm_cost(
+                        symbol=symbol,
+                        input_tokens=llm_usage.get("input_tokens", 0),
+                        output_tokens=llm_usage.get("output_tokens", 0),
+                        cached_tokens=llm_usage.get("cached_tokens", 0)
+                    )
+                    try:
+                        db_ops.save_llm_cost(
+                            symbol=symbol,
+                            input_tokens=llm_usage.get("input_tokens", 0),
+                            output_tokens=llm_usage.get("output_tokens", 0),
+                            cost_usd=llm_usage.get("cost_usd", 0),
+                            cached_tokens=llm_usage.get("cached_tokens", 0)
+                        )
+                    except Exception as e:
+                        logger.debug(f"Error saving analysis LLM cost: {e}")
 
                 # Save to database
                 db_ops.save_ai_analysis(

@@ -13,7 +13,8 @@ import {
   Wallet,
   Terminal,
   X,
-  Menu
+  Menu,
+  DollarSign
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
@@ -24,6 +25,7 @@ const navigation = [
   { name: 'Positions', href: '/positions', icon: TrendingUp },
   { name: 'Trade History', href: '/history', icon: History },
   { name: 'Market Analysis', href: '/market', icon: BarChart3 },
+  { name: 'Costs', href: '/costs', icon: DollarSign },
   { name: 'Settings', href: '/settings', icon: Settings },
 ]
 

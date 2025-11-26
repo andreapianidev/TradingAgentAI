@@ -242,3 +242,41 @@ export interface TradingAIAnalysis {
   }
   trading_mode: 'paper' | 'live'
 }
+
+export interface TradingCost {
+  id: string
+  created_at: string
+  cost_type: 'llm' | 'trading_fee'
+  llm_provider?: string
+  llm_model?: string
+  input_tokens?: number
+  output_tokens?: number
+  cached_tokens?: number
+  position_id?: string
+  fee_type?: string
+  trade_value_usd?: number
+  fee_rate?: number
+  cost_usd: number
+  symbol?: string
+  decision_id?: string
+  trading_mode: 'paper' | 'live'
+  details?: any
+}
+
+export interface TradingCostSummary {
+  id: string
+  created_at: string
+  period_type: 'daily' | 'monthly'
+  period_start: string
+  period_end: string
+  llm_total_cost_usd: number
+  llm_input_tokens: number
+  llm_output_tokens: number
+  llm_cached_tokens: number
+  llm_calls_count: number
+  trading_fees_total_usd: number
+  trades_count: number
+  total_cost_usd: number
+  cost_by_symbol?: Record<string, { llm: number; fees: number }>
+  trading_mode: 'paper' | 'live'
+}

@@ -18,6 +18,7 @@ import EquityChart from '@/components/EquityChart'
 import RecentTrades from '@/components/RecentTrades'
 import OpenPositions from '@/components/OpenPositions'
 import AlertsPanel from '@/components/AlertsPanel'
+import CostSummaryCard from '@/components/CostSummaryCard'
 
 const SYNC_INTERVAL = 30000 // 30 seconds
 
@@ -269,9 +270,10 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Alerts Panel */}
-        <div>
+        {/* Right Column: Alerts + Costs */}
+        <div className="space-y-6">
           <AlertsPanel alerts={alerts} />
+          <CostSummaryCard />
         </div>
       </div>
 

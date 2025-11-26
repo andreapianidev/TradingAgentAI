@@ -1019,5 +1019,161 @@ class SupabaseOperations:
             return None
 
 
+    # ============== Cost Tracking ==============
+
+    def save_llm_cost(
+        self,
+        symbol: str,
+        input_tokens: int,
+        output_tokens: int,
+        cost_usd: float,
+        cached_tokens: int = 0,
+        model: str = None,
+        decision_id: str = None,
+        details: Dict[str, Any] = None
+    ) -> str:
+        """
+        Save LLM API cost record.
+
+        Returns:
+            ID of the created cost record
+        """
+        data = {
+            "cost_type": "llm",
+            "llm_provider": "deepseek",
+            "llm_model": model or "deepseek-chat",
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cached_tokens": cached_tokens,
+            "cost_usd": cost_usd,
+            "symbol": symbol,
+            "decision_id": decision_id,
+            "trading_mode": "paper" if settings.PAPER_TRADING else "live",
+            "details": details
+        }
+
+        result = self.client.table("trading_costs").insert(data).execute()
+        cost_id = result.data[0]["id"]
+        logger.debug(f"Saved LLM cost {cost_id}: ${cost_usd:.6f} for {symbol}")
+        return cost_id
+
+    def save_trading_fee(
+        self,
+        symbol: str,
+        trade_value_usd: float,
+        fee_usd: float,
+        fee_type: str = "taker",
+        position_id: str = None,
+        estimated_fee_usd: float = None
+    ) -> str:
+        """
+        Save trading fee record.
+
+        Returns:
+            ID of the created cost record
+        """
+        fee_rate = 0.00075 if not settings.PAPER_TRADING else 0
+
+        data = {
+            "cost_type": "trading_fee",
+            "fee_type": fee_type,
+            "trade_value_usd": trade_value_usd,
+            "fee_rate": fee_rate,
+            "cost_usd": fee_usd,
+            "symbol": symbol,
+            "position_id": position_id,
+            "trading_mode": "paper" if settings.PAPER_TRADING else "live",
+            "details": {"estimated_live_fee_usd": estimated_fee_usd} if estimated_fee_usd else None
+        }
+
+        result = self.client.table("trading_costs").insert(data).execute()
+        cost_id = result.data[0]["id"]
+        logger.debug(f"Saved trading fee {cost_id}: ${fee_usd:.4f} for {symbol}")
+        return cost_id
+
+    def get_costs_by_date_range(
+        self,
+        start_date: str,
+        end_date: str = None,
+        cost_type: str = None,
+        symbol: str = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get cost records for a date range.
+
+        Args:
+            start_date: Start date (ISO format)
+            end_date: End date (ISO format), defaults to now
+            cost_type: Filter by 'llm' or 'trading_fee'
+            symbol: Filter by symbol
+
+        Returns:
+            List of cost records
+        """
+        query = self.client.table("trading_costs") \
+            .select("*") \
+            .gte("created_at", start_date)
+
+        if end_date:
+            query = query.lte("created_at", end_date)
+
+        if cost_type:
+            query = query.eq("cost_type", cost_type)
+
+        if symbol:
+            query = query.eq("symbol", symbol)
+
+        result = query.order("created_at", desc=True).execute()
+        return result.data
+
+    def get_cost_totals(
+        self,
+        start_date: str,
+        end_date: str = None
+    ) -> Dict[str, Any]:
+        """
+        Get aggregated cost totals for a period.
+
+        Returns:
+            Dictionary with llm and trading fee totals
+        """
+        costs = self.get_costs_by_date_range(start_date, end_date)
+
+        llm_costs = [c for c in costs if c["cost_type"] == "llm"]
+        fee_costs = [c for c in costs if c["cost_type"] == "trading_fee"]
+
+        return {
+            "llm_total_usd": sum(float(c["cost_usd"]) for c in llm_costs),
+            "llm_calls": len(llm_costs),
+            "llm_input_tokens": sum(c.get("input_tokens") or 0 for c in llm_costs),
+            "llm_output_tokens": sum(c.get("output_tokens") or 0 for c in llm_costs),
+            "llm_cached_tokens": sum(c.get("cached_tokens") or 0 for c in llm_costs),
+            "trading_fees_total_usd": sum(float(c["cost_usd"]) for c in fee_costs),
+            "trades_count": len(fee_costs),
+            "total_cost_usd": sum(float(c["cost_usd"]) for c in costs)
+        }
+
+    def update_decision_llm_cost(
+        self,
+        decision_id: str,
+        input_tokens: int,
+        output_tokens: int,
+        cost_usd: float,
+        cached_tokens: int = 0
+    ) -> None:
+        """Update a trading decision with LLM cost info."""
+        self.client.table("trading_decisions") \
+            .update({
+                "llm_input_tokens": input_tokens,
+                "llm_output_tokens": output_tokens,
+                "llm_cached_tokens": cached_tokens,
+                "llm_cost_usd": cost_usd
+            }) \
+            .eq("id", decision_id) \
+            .execute()
+
+        logger.debug(f"Updated decision {decision_id} with LLM cost: ${cost_usd:.6f}")
+
+
 # Global operations instance
 db_ops = SupabaseOperations()
