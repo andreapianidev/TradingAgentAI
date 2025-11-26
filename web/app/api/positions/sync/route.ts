@@ -259,7 +259,14 @@ export async function POST() {
     const availableBalance = parseFloat(alpacaAccount.buying_power)
     const marginUsed = totalEquity - availableBalance
 
-    // Calculate total unrealized PnL
+    // Initial capital for PnL calculation
+    const INITIAL_CAPITAL = 100000
+
+    // Calculate total PnL based on initial capital
+    const totalPnl = totalEquity - INITIAL_CAPITAL
+    const totalPnlPct = (totalPnl / INITIAL_CAPITAL) * 100
+
+    // Calculate total unrealized PnL (for daily tracking)
     const totalUnrealizedPnl = alpacaPositions.reduce(
       (sum, p) => sum + parseFloat(p.unrealized_pl),
       0
@@ -280,10 +287,10 @@ export async function POST() {
       margin_used_usdc: marginUsed,
       open_positions_count: alpacaPositions.length,
       exposure_pct: exposurePct,
-      total_pnl: totalUnrealizedPnl,
-      total_pnl_pct: totalEquity > 0 ? (totalUnrealizedPnl / totalEquity) * 100 : 0,
+      total_pnl: totalPnl,
+      total_pnl_pct: totalPnlPct,
       daily_pnl: totalUnrealizedPnl,
-      daily_pnl_pct: totalEquity > 0 ? (totalUnrealizedPnl / totalEquity) * 100 : 0,
+      daily_pnl_pct: totalEquity > 0 ? (totalUnrealizedPnl / INITIAL_CAPITAL) * 100 : 0,
       trading_mode: tradingMode,
     })
 

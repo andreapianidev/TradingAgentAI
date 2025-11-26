@@ -1,14 +1,25 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { supabase, TradingPosition } from '@/lib/supabase'
+import { supabase, TradingPosition, TradingPortfolioSnapshot } from '@/lib/supabase'
 import { formatCurrency, formatPercent, formatDate, cn, getPnlColor, getDirectionBgColor, getStatusColor } from '@/lib/utils'
-import { ArrowUpRight, ArrowDownRight, X, Filter, Download, RefreshCw, CheckCircle, AlertCircle, TrendingUp, TrendingDown, Activity, DollarSign } from 'lucide-react'
+import { ArrowUpRight, ArrowDownRight, X, Filter, Download, RefreshCw, CheckCircle, AlertCircle, TrendingUp, TrendingDown, Activity, DollarSign, Wallet, PiggyBank, Target, BarChart3 } from 'lucide-react'
 
 const SYNC_INTERVAL = 30000 // 30 seconds
+const INITIAL_CAPITAL = 100000 // Starting capital for P&L calculations
+
+interface PortfolioStats {
+  totalEquity: number
+  totalPnl: number
+  totalPnlPct: number
+  unrealizedPnl: number
+  investedValue: number
+  exposurePct: number
+}
 
 export default function PositionsPage() {
   const [positions, setPositions] = useState<TradingPosition[]>([])
+  const [portfolioStats, setPortfolioStats] = useState<PortfolioStats | null>(null)
   const [filter, setFilter] = useState<'all' | 'open' | 'closed'>('all')
   const [symbolFilter, setSymbolFilter] = useState<string>('all')
   const [loading, setLoading] = useState(true)
@@ -45,11 +56,78 @@ export default function PositionsPage() {
     }
   }, [])
 
+  // Fetch portfolio stats from snapshot and live API
+  const fetchPortfolioStats = useCallback(async () => {
+    try {
+      // Try live API first
+      const liveRes = await fetch('/api/account/live')
+      const liveData = await liveRes.json()
+
+      if (liveData.success && liveData.account) {
+        const equity = liveData.account.equity
+        const totalPnl = equity - INITIAL_CAPITAL
+        setPortfolioStats({
+          totalEquity: equity,
+          totalPnl: totalPnl,
+          totalPnlPct: (totalPnl / INITIAL_CAPITAL) * 100,
+          unrealizedPnl: liveData.account.totalUnrealizedPnl || 0,
+          investedValue: liveData.account.positionsValue || 0,
+          exposurePct: liveData.account.exposurePct || 0,
+        })
+        return
+      }
+
+      // Fallback to database snapshot
+      const { data: snapshot } = await supabase
+        .from('trading_portfolio_snapshots')
+        .select('*')
+        .order('timestamp', { ascending: false })
+        .limit(1)
+        .single()
+
+      if (snapshot) {
+        const equity = parseFloat(String(snapshot.total_equity_usdc)) || INITIAL_CAPITAL
+        const totalPnl = equity - INITIAL_CAPITAL
+
+        // Calculate invested value from positions
+        const { data: openPositions } = await supabase
+          .from('trading_positions')
+          .select('entry_price, quantity')
+          .eq('status', 'open')
+
+        const investedValue = openPositions?.reduce((sum, p) => {
+          return sum + (parseFloat(String(p.entry_price)) * parseFloat(String(p.quantity)))
+        }, 0) || 0
+
+        // Calculate unrealized P&L from open positions
+        const { data: openPnl } = await supabase
+          .from('trading_positions')
+          .select('unrealized_pnl')
+          .eq('status', 'open')
+
+        const unrealizedPnl = openPnl?.reduce((sum, p) => {
+          return sum + (parseFloat(String(p.unrealized_pnl || 0)))
+        }, 0) || 0
+
+        setPortfolioStats({
+          totalEquity: equity,
+          totalPnl: totalPnl,
+          totalPnlPct: (totalPnl / INITIAL_CAPITAL) * 100,
+          unrealizedPnl: unrealizedPnl,
+          investedValue: investedValue,
+          exposurePct: parseFloat(String(snapshot.exposure_pct)) || 0,
+        })
+      }
+    } catch (error) {
+      console.error('Error fetching portfolio stats:', error)
+    }
+  }, [])
+
   // Initial sync and fetch
   useEffect(() => {
     const init = async () => {
       await syncPositions(true)
-      await fetchPositions()
+      await Promise.all([fetchPositions(), fetchPortfolioStats()])
     }
     init()
   }, [])
@@ -58,11 +136,11 @@ export default function PositionsPage() {
   useEffect(() => {
     const interval = setInterval(async () => {
       await syncPositions(false)
-      await fetchPositions()
+      await Promise.all([fetchPositions(), fetchPortfolioStats()])
     }, SYNC_INTERVAL)
 
     return () => clearInterval(interval)
-  }, [syncPositions])
+  }, [syncPositions, fetchPortfolioStats])
 
   // Fetch when filters change
   useEffect(() => {
@@ -136,11 +214,21 @@ export default function PositionsPage() {
     a.click()
   }
 
+  // Calculate unrealized P&L from open positions in current view
+  const openPositionsUnrealizedPnl = positions
+    .filter(p => p.status === 'open')
+    .reduce((sum, p) => sum + (parseFloat(String(p.unrealized_pnl || 0))), 0)
+
   const stats = {
     total: positions.length,
     open: positions.filter(p => p.status === 'open').length,
     closed: positions.filter(p => p.status === 'closed').length,
-    totalPnl: positions.reduce((sum, p) => sum + (parseFloat(String(p.realized_pnl || 0))), 0),
+    // Use portfolio stats for accurate P&L, fallback to calculated
+    totalPnl: portfolioStats?.totalPnl ?? 0,
+    totalPnlPct: portfolioStats?.totalPnlPct ?? 0,
+    unrealizedPnl: portfolioStats?.unrealizedPnl ?? openPositionsUnrealizedPnl,
+    investedValue: portfolioStats?.investedValue ?? 0,
+    exposurePct: portfolioStats?.exposurePct ?? 0,
     winRate: positions.filter(p => p.status === 'closed').length > 0
       ? (positions.filter(p => p.status === 'closed' && parseFloat(String(p.realized_pnl || 0)) > 0).length /
          positions.filter(p => p.status === 'closed').length) * 100
@@ -199,12 +287,76 @@ export default function PositionsPage() {
         </div>
       </div>
 
+      {/* Portfolio Overview */}
+      {portfolioStats && (
+        <div className={cn(
+          "card p-4 bg-gradient-to-r from-gray-900/80 to-gray-800/50 border-gray-700/50",
+          mounted && "animate-fade-in-up"
+        )} style={{ animationDelay: '0.1s' }}>
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className={cn(
+                "p-3 rounded-xl",
+                stats.totalPnl >= 0 ? "bg-green-500/10" : "bg-red-500/10"
+              )}>
+                <Wallet className={cn(
+                  "w-8 h-8",
+                  stats.totalPnl >= 0 ? "text-green-500" : "text-red-500"
+                )} />
+              </div>
+              <div>
+                <div className="text-xs text-gray-500 uppercase tracking-wide">Portfolio Value</div>
+                <div className="text-2xl font-bold text-white">
+                  {formatCurrency(portfolioStats.totalEquity)}
+                </div>
+                <div className={cn(
+                  "flex items-center gap-1 text-sm font-medium",
+                  stats.totalPnl >= 0 ? "text-green-500" : "text-red-500"
+                )}>
+                  {stats.totalPnl >= 0 ? (
+                    <TrendingUp className="w-4 h-4" />
+                  ) : (
+                    <TrendingDown className="w-4 h-4" />
+                  )}
+                  <span>{stats.totalPnl >= 0 ? '+' : ''}{formatCurrency(stats.totalPnl)}</span>
+                  <span className="text-gray-500">({stats.totalPnlPct >= 0 ? '+' : ''}{stats.totalPnlPct.toFixed(2)}%)</span>
+                  <span className="text-xs text-gray-500 ml-1">total</span>
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="text-center p-3 bg-gray-800/50 rounded-lg">
+                <div className="text-xs text-gray-500">Invested</div>
+                <div className="text-lg font-bold text-white">{formatCurrency(stats.investedValue)}</div>
+              </div>
+              <div className="text-center p-3 bg-gray-800/50 rounded-lg">
+                <div className="text-xs text-gray-500">Unrealized P&L</div>
+                <div className={cn(
+                  "text-lg font-bold",
+                  stats.unrealizedPnl >= 0 ? "text-green-500" : "text-red-500"
+                )}>
+                  {stats.unrealizedPnl >= 0 ? '+' : ''}{formatCurrency(stats.unrealizedPnl)}
+                </div>
+              </div>
+              <div className="text-center p-3 bg-gray-800/50 rounded-lg">
+                <div className="text-xs text-gray-500">Exposure</div>
+                <div className="text-lg font-bold text-white">{stats.exposurePct.toFixed(1)}%</div>
+              </div>
+              <div className="text-center p-3 bg-gray-800/50 rounded-lg">
+                <div className="text-xs text-gray-500">Open Positions</div>
+                <div className="text-lg font-bold text-green-500">{stats.open}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className={cn(
           "stat-card stat-card-enhanced group cursor-default",
           mounted && "animate-fade-in-up"
-        )} style={{ animationDelay: '0.1s' }}>
+        )} style={{ animationDelay: '0.15s' }}>
           <div className="flex items-center justify-between">
             <div className="stat-label">Total Positions</div>
             <div className="p-2 rounded-lg bg-gray-800/50 group-hover:bg-gray-700/50 transition-colors">
@@ -228,7 +380,7 @@ export default function PositionsPage() {
         <div className={cn(
           "stat-card stat-card-enhanced group cursor-default",
           mounted && "animate-fade-in-up"
-        )} style={{ animationDelay: '0.3s' }}>
+        )} style={{ animationDelay: '0.25s' }}>
           <div className="flex items-center justify-between">
             <div className="stat-label">Closed</div>
             <div className="p-2 rounded-lg bg-blue-500/10 group-hover:bg-blue-500/20 transition-colors">
@@ -240,27 +392,27 @@ export default function PositionsPage() {
         <div className={cn(
           "stat-card stat-card-enhanced group cursor-default",
           mounted && "animate-fade-in-up"
-        )} style={{ animationDelay: '0.4s' }}>
+        )} style={{ animationDelay: '0.3s' }}>
           <div className="flex items-center justify-between">
-            <div className="stat-label">Total Realized P&L</div>
+            <div className="stat-label">Unrealized P&L</div>
             <div className={cn(
               "p-2 rounded-lg transition-colors",
-              stats.totalPnl >= 0
+              stats.unrealizedPnl >= 0
                 ? "bg-green-500/10 group-hover:bg-green-500/20"
                 : "bg-red-500/10 group-hover:bg-red-500/20"
             )}>
-              <DollarSign className={cn(
+              <BarChart3 className={cn(
                 "w-4 h-4 group-hover:scale-110 transition-transform icon-bounce",
-                stats.totalPnl >= 0 ? "text-green-500" : "text-red-500"
+                stats.unrealizedPnl >= 0 ? "text-green-500" : "text-red-500"
               )} />
             </div>
           </div>
           <div className={cn(
             'stat-value animate-count',
-            getPnlColor(stats.totalPnl),
-            stats.totalPnl > 0 && 'pnl-positive'
+            getPnlColor(stats.unrealizedPnl),
+            stats.unrealizedPnl > 0 && 'pnl-positive'
           )}>
-            {formatCurrency(stats.totalPnl)}
+            {stats.unrealizedPnl >= 0 ? '+' : ''}{formatCurrency(stats.unrealizedPnl)}
           </div>
         </div>
       </div>

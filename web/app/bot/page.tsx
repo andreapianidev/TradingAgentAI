@@ -28,7 +28,8 @@ import {
   ArrowUpDown,
   Crosshair,
   Zap,
-  BookOpen
+  BookOpen,
+  Globe
 } from 'lucide-react'
 import { cn, formatCurrency, formatPercent } from '@/lib/utils'
 import { supabase, TradingDecision, TradingPortfolioSnapshot, TradingMarketContext } from '@/lib/supabase'
@@ -36,7 +37,7 @@ import { supabase, TradingDecision, TradingPortfolioSnapshot, TradingMarketConte
 interface ActivityLog {
   id: string
   timestamp: string
-  type: 'decision' | 'market' | 'portfolio' | 'system' | 'news' | 'whale' | 'sentiment'
+  type: 'decision' | 'market' | 'portfolio' | 'system' | 'news' | 'whale' | 'sentiment' | 'global'
   level: 'info' | 'success' | 'warning' | 'error'
   symbol?: string
   action?: string
@@ -75,12 +76,35 @@ interface LiveAccountData {
   error?: string
 }
 
-type FilterType = 'all' | 'decision' | 'market' | 'portfolio' | 'news' | 'whale' | 'sentiment'
+interface DatabasePortfolioData {
+  totalEquity: number
+  availableBalance: number
+  investedValue: number
+  unrealizedPnl: number
+  exposurePct: number
+  positionsCount: number
+  dailyPnl: number
+  totalPnl: number
+  totalPnlPct: number
+  positions: Array<{
+    symbol: string
+    entryPrice: number
+    quantity: number
+    marketValue: number
+    unrealizedPnl: number
+    unrealizedPnlPct: number
+  }>
+}
+
+const INITIAL_CAPITAL = 100000
+
+type FilterType = 'all' | 'decision' | 'market' | 'portfolio' | 'news' | 'whale' | 'sentiment' | 'global'
 
 export default function BotConsolePage() {
   const [activities, setActivities] = useState<ActivityLog[]>([])
   const [latestSnapshot, setLatestSnapshot] = useState<TradingPortfolioSnapshot | null>(null)
   const [liveAccount, setLiveAccount] = useState<LiveAccountData | null>(null)
+  const [dbPortfolio, setDbPortfolio] = useState<DatabasePortfolioData | null>(null)
   const [loading, setLoading] = useState(true)
   const [autoScroll, setAutoScroll] = useState(true)
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set())
@@ -88,11 +112,84 @@ export default function BotConsolePage() {
   const logsEndRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
+  // Fetch portfolio data from database as fallback
+  const fetchDatabasePortfolio = async () => {
+    try {
+      // Get latest portfolio snapshot
+      const { data: snapshot } = await supabase
+        .from('trading_portfolio_snapshots')
+        .select('*')
+        .order('timestamp', { ascending: false })
+        .limit(1)
+        .single()
+
+      // Get open positions
+      const { data: openPositions } = await supabase
+        .from('trading_positions')
+        .select('*')
+        .eq('status', 'open')
+
+      if (snapshot) {
+        const equity = parseFloat(String(snapshot.total_equity_usdc)) || INITIAL_CAPITAL
+        const availableBalance = parseFloat(String(snapshot.available_balance_usdc)) || equity
+
+        // Calculate invested value and unrealized P&L from positions
+        let investedValue = 0
+        let unrealizedPnl = 0
+        const positionsData: DatabasePortfolioData['positions'] = []
+
+        if (openPositions) {
+          for (const pos of openPositions) {
+            const entryPrice = parseFloat(String(pos.entry_price)) || 0
+            const quantity = parseFloat(String(pos.quantity)) || 0
+            const posUnrealizedPnl = parseFloat(String(pos.unrealized_pnl)) || 0
+            const posUnrealizedPnlPct = parseFloat(String(pos.unrealized_pnl_pct)) || 0
+            const marketValue = entryPrice * quantity + posUnrealizedPnl
+
+            investedValue += entryPrice * quantity
+            unrealizedPnl += posUnrealizedPnl
+
+            positionsData.push({
+              symbol: pos.symbol,
+              entryPrice,
+              quantity,
+              marketValue,
+              unrealizedPnl: posUnrealizedPnl,
+              unrealizedPnlPct: posUnrealizedPnlPct,
+            })
+          }
+        }
+
+        const totalPnl = equity - INITIAL_CAPITAL
+        const totalPnlPct = (totalPnl / INITIAL_CAPITAL) * 100
+
+        setDbPortfolio({
+          totalEquity: equity,
+          availableBalance,
+          investedValue,
+          unrealizedPnl,
+          exposurePct: parseFloat(String(snapshot.exposure_pct)) || 0,
+          positionsCount: openPositions?.length || 0,
+          dailyPnl: parseFloat(String(snapshot.daily_pnl)) || 0,
+          totalPnl,
+          totalPnlPct,
+          positions: positionsData,
+        })
+      }
+    } catch (error) {
+      console.error('Error fetching database portfolio:', error)
+    }
+  }
+
   useEffect(() => {
     fetchActivityData()
     fetchLiveAccount()
+    fetchDatabasePortfolio()
     const activityInterval = setInterval(fetchActivityData, 5000) // Poll every 5 seconds
-    const liveInterval = setInterval(fetchLiveAccount, 10000) // Live data every 10 seconds
+    const liveInterval = setInterval(() => {
+      fetchLiveAccount()
+      fetchDatabasePortfolio()
+    }, 10000) // Live data every 10 seconds
     return () => {
       clearInterval(activityInterval)
       clearInterval(liveInterval)
@@ -148,6 +245,13 @@ export default function BotConsolePage() {
         .from('trading_whale_flow_summary')
         .select('*')
         .order('created_at', { ascending: false })
+        .limit(10)
+
+      // Fetch CoinGecko global market data
+      const { data: globalMarket } = await supabase
+        .from('trading_market_global')
+        .select('*')
+        .order('timestamp', { ascending: false })
         .limit(10)
 
       if (snapshots && snapshots.length > 0) {
@@ -372,6 +476,37 @@ export default function BotConsolePage() {
         })
       })
 
+      // Add CoinGecko global market data
+      globalMarket?.forEach(g => {
+        const btcDom = g.btc_dominance ? parseFloat(g.btc_dominance) : 0
+        const mcapChange = g.market_cap_change_24h_pct ? parseFloat(g.market_cap_change_24h_pct) : 0
+        const totalMcap = g.total_market_cap_usd ? parseFloat(g.total_market_cap_usd) : 0
+        const trendingSymbols = g.trending_symbols || []
+        const trackedTrending = g.tracked_trending || []
+
+        const mcapTrend = mcapChange >= 0 ? '📈' : '📉'
+        const trendingStr = trendingSymbols.slice(0, 5).join(', ') || 'N/A'
+
+        logs.push({
+          id: `global-${g.id}`,
+          timestamp: g.timestamp || g.created_at,
+          type: 'global',
+          level: Math.abs(mcapChange) > 3 ? 'warning' : 'info',
+          message: `${mcapTrend} Market: BTC ${btcDom.toFixed(1)}% | MCap $${(totalMcap/1e12).toFixed(2)}T (${mcapChange >= 0 ? '+' : ''}${mcapChange.toFixed(2)}%) | Trending: ${trendingStr}`,
+          details: {
+            btc_dominance: btcDom,
+            eth_dominance: g.eth_dominance ? parseFloat(g.eth_dominance) : 0,
+            total_market_cap: totalMcap,
+            total_volume_24h: g.total_volume_24h_usd ? parseFloat(g.total_volume_24h_usd) : 0,
+            market_cap_change_24h: mcapChange,
+            active_cryptocurrencies: g.active_cryptocurrencies,
+            trending_coins: g.trending_coins || [],
+            trending_symbols: trendingSymbols,
+            tracked_trending: trackedTrending
+          }
+        })
+      })
+
       // Sort by timestamp
       logs.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
 
@@ -429,6 +564,8 @@ export default function BotConsolePage() {
         return <Fish className="w-4 h-4 text-blue-400" />
       case 'sentiment':
         return <Gauge className="w-4 h-4 text-pink-500" />
+      case 'global':
+        return <Globe className="w-4 h-4 text-teal-500" />
       default:
         return <Terminal className="w-4 h-4 text-gray-500" />
     }
@@ -445,6 +582,7 @@ export default function BotConsolePage() {
       case 'news': return 'text-orange-400'
       case 'whale': return 'text-blue-400'
       case 'sentiment': return 'text-pink-400'
+      case 'global': return 'text-teal-400'
       default: return 'text-gray-400'
     }
   }
@@ -763,7 +901,7 @@ export default function BotConsolePage() {
         <div className="flex items-center gap-2">
           {/* Filter */}
           <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 overflow-x-auto">
-            {(['all', 'decision', 'market', 'portfolio', 'news', 'whale', 'sentiment'] as FilterType[]).map(f => (
+            {(['all', 'decision', 'market', 'portfolio', 'news', 'whale', 'sentiment', 'global'] as FilterType[]).map(f => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -811,46 +949,58 @@ export default function BotConsolePage() {
       </div>
 
       {/* Live Portfolio Status Bar */}
-      {(liveAccount?.account || latestSnapshot) && (
+      {(liveAccount?.account || dbPortfolio || latestSnapshot) && (
         <div className="border-b border-gray-200 dark:border-gray-800">
           {/* Main Portfolio Value */}
           <div className="p-4 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-900/50 dark:to-gray-800/30">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-center gap-4">
-                <div className="p-3 bg-green-500/10 rounded-xl">
-                  <DollarSign className="w-8 h-8 text-green-500" />
+                <div className={cn(
+                  "p-3 rounded-xl",
+                  (dbPortfolio?.totalPnl ?? 0) >= 0 ? "bg-green-500/10" : "bg-red-500/10"
+                )}>
+                  <DollarSign className={cn(
+                    "w-8 h-8",
+                    (dbPortfolio?.totalPnl ?? 0) >= 0 ? "text-green-500" : "text-red-500"
+                  )} />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-gray-500 uppercase tracking-wide">Portfolio Value</span>
-                    {liveAccount?.configured && (
+                    {liveAccount?.configured && liveAccount?.success && (
                       <span className="flex items-center gap-1 px-1.5 py-0.5 bg-green-500/10 text-green-500 text-xs rounded">
                         <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
                         LIVE
                       </span>
                     )}
-                    {liveAccount?.mode === 'paper' && (
+                    {!liveAccount?.success && dbPortfolio && (
+                      <span className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-500/10 text-blue-500 text-xs rounded">
+                        DB
+                      </span>
+                    )}
+                    {(liveAccount?.mode === 'paper' || (!liveAccount?.success && dbPortfolio)) && (
                       <span className="px-1.5 py-0.5 bg-yellow-500/10 text-yellow-600 text-xs rounded">
                         PAPER
                       </span>
                     )}
                   </div>
                   <div className="text-3xl font-bold text-gray-900 dark:text-white">
-                    {formatCurrency(liveAccount?.account?.equity ?? Number(latestSnapshot?.total_equity_usdc) ?? 0)}
+                    {formatCurrency(liveAccount?.account?.equity ?? dbPortfolio?.totalEquity ?? Number(latestSnapshot?.total_equity_usdc) ?? INITIAL_CAPITAL)}
                   </div>
-                  {liveAccount?.account && (
+                  {/* Show Total P&L from initial capital */}
+                  {(liveAccount?.account || dbPortfolio) && (
                     <div className={cn(
                       "flex items-center gap-1 text-sm font-medium",
-                      liveAccount.account.dailyPnl >= 0 ? "text-green-500" : "text-red-500"
+                      (dbPortfolio?.totalPnl ?? liveAccount?.account?.dailyPnl ?? 0) >= 0 ? "text-green-500" : "text-red-500"
                     )}>
-                      {liveAccount.account.dailyPnl >= 0 ? (
+                      {(dbPortfolio?.totalPnl ?? liveAccount?.account?.dailyPnl ?? 0) >= 0 ? (
                         <TrendingUp className="w-4 h-4" />
                       ) : (
                         <TrendingDown className="w-4 h-4" />
                       )}
-                      <span>{liveAccount.account.dailyPnl >= 0 ? '+' : ''}{formatCurrency(liveAccount.account.dailyPnl)}</span>
-                      <span className="text-gray-500">({liveAccount.account.dailyPnlPct >= 0 ? '+' : ''}{liveAccount.account.dailyPnlPct.toFixed(2)}%)</span>
-                      <span className="text-xs text-gray-400 ml-1">today</span>
+                      <span>{(dbPortfolio?.totalPnl ?? 0) >= 0 ? '+' : ''}{formatCurrency(dbPortfolio?.totalPnl ?? liveAccount?.account?.dailyPnl ?? 0)}</span>
+                      <span className="text-gray-500">({(dbPortfolio?.totalPnlPct ?? liveAccount?.account?.dailyPnlPct ?? 0) >= 0 ? '+' : ''}{(dbPortfolio?.totalPnlPct ?? liveAccount?.account?.dailyPnlPct ?? 0).toFixed(2)}%)</span>
+                      <span className="text-xs text-gray-400 ml-1">total</span>
                     </div>
                   )}
                 </div>
@@ -870,7 +1020,7 @@ export default function BotConsolePage() {
               <div>
                 <div className="text-xs text-gray-500">Cash</div>
                 <div className="font-bold text-gray-900 dark:text-white">
-                  {formatCurrency(liveAccount?.account?.cash ?? Number(latestSnapshot?.available_balance_usdc) ?? 0)}
+                  {formatCurrency(liveAccount?.account?.cash ?? dbPortfolio?.availableBalance ?? Number(latestSnapshot?.available_balance_usdc) ?? 0)}
                 </div>
               </div>
             </div>
@@ -879,12 +1029,12 @@ export default function BotConsolePage() {
               <div>
                 <div className="text-xs text-gray-500">Invested</div>
                 <div className="font-bold text-gray-900 dark:text-white">
-                  {formatCurrency(liveAccount?.account?.positionsValue ?? 0)}
+                  {formatCurrency(liveAccount?.account?.positionsValue ?? dbPortfolio?.investedValue ?? 0)}
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-3">
-              {(liveAccount?.account?.totalUnrealizedPnl ?? 0) >= 0 ? (
+              {(liveAccount?.account?.totalUnrealizedPnl ?? dbPortfolio?.unrealizedPnl ?? 0) >= 0 ? (
                 <TrendingUp className="w-5 h-5 text-green-500" />
               ) : (
                 <TrendingDown className="w-5 h-5 text-red-500" />
@@ -893,9 +1043,9 @@ export default function BotConsolePage() {
                 <div className="text-xs text-gray-500">Unrealized P&L</div>
                 <div className={cn(
                   "font-bold",
-                  (liveAccount?.account?.totalUnrealizedPnl ?? 0) >= 0 ? "text-green-500" : "text-red-500"
+                  (liveAccount?.account?.totalUnrealizedPnl ?? dbPortfolio?.unrealizedPnl ?? 0) >= 0 ? "text-green-500" : "text-red-500"
                 )}>
-                  {(liveAccount?.account?.totalUnrealizedPnl ?? 0) >= 0 ? '+' : ''}{formatCurrency(liveAccount?.account?.totalUnrealizedPnl ?? 0)}
+                  {(liveAccount?.account?.totalUnrealizedPnl ?? dbPortfolio?.unrealizedPnl ?? 0) >= 0 ? '+' : ''}{formatCurrency(liveAccount?.account?.totalUnrealizedPnl ?? dbPortfolio?.unrealizedPnl ?? 0)}
                 </div>
               </div>
             </div>
@@ -904,7 +1054,7 @@ export default function BotConsolePage() {
               <div>
                 <div className="text-xs text-gray-500">Exposure</div>
                 <div className="font-bold text-gray-900 dark:text-white">
-                  {(liveAccount?.account?.exposurePct ?? Number(latestSnapshot?.exposure_pct) ?? 0).toFixed(1)}%
+                  {(liveAccount?.account?.exposurePct ?? dbPortfolio?.exposurePct ?? Number(latestSnapshot?.exposure_pct) ?? 0).toFixed(1)}%
                 </div>
               </div>
             </div>
@@ -913,18 +1063,18 @@ export default function BotConsolePage() {
               <div>
                 <div className="text-xs text-gray-500">Positions</div>
                 <div className="font-bold text-gray-900 dark:text-white">
-                  {liveAccount?.account?.positionsCount ?? latestSnapshot?.open_positions_count ?? 0}
+                  {liveAccount?.account?.positionsCount ?? dbPortfolio?.positionsCount ?? latestSnapshot?.open_positions_count ?? 0}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Open Positions Detail */}
-          {liveAccount?.positions && liveAccount.positions.length > 0 && (
+          {/* Open Positions Detail - show from live API or database */}
+          {((liveAccount?.positions && liveAccount.positions.length > 0) || (dbPortfolio?.positions && dbPortfolio.positions.length > 0)) && (
             <div className="px-4 pb-4 bg-gray-50/50 dark:bg-gray-900/30">
               <div className="text-xs text-gray-500 mb-2 uppercase tracking-wide">Open Positions</div>
               <div className="flex flex-wrap gap-2">
-                {liveAccount.positions.map(pos => (
+                {(liveAccount?.positions || dbPortfolio?.positions || []).map(pos => (
                   <div
                     key={pos.symbol}
                     className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
@@ -1012,7 +1162,8 @@ export default function BotConsolePage() {
                         log.type === 'portfolio' && 'bg-yellow-500/10 text-yellow-400',
                         log.type === 'news' && 'bg-orange-500/10 text-orange-400',
                         log.type === 'whale' && 'bg-blue-500/10 text-blue-400',
-                        log.type === 'sentiment' && 'bg-pink-500/10 text-pink-400'
+                        log.type === 'sentiment' && 'bg-pink-500/10 text-pink-400',
+                        log.type === 'global' && 'bg-teal-500/10 text-teal-400'
                       )}>
                         {log.type}
                       </span>
@@ -1267,6 +1418,97 @@ export default function BotConsolePage() {
                             </div>
                           </div>
                         )}
+                        {log.type === 'global' && (
+                          <div className="space-y-4">
+                            {/* Market Overview */}
+                            <div className="bg-gray-200 dark:bg-gray-800 rounded-lg p-3">
+                              <div className="flex items-center gap-2 mb-2">
+                                <Globe className="w-4 h-4 text-teal-500" />
+                                <span className="text-xs font-semibold text-gray-500 uppercase">Global Market Overview</span>
+                              </div>
+                              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+                                <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                                  <div className="text-xs text-gray-500">BTC Dominance</div>
+                                  <div className="text-lg font-bold text-orange-500">
+                                    {log.details.btc_dominance?.toFixed(1) || 'N/A'}%
+                                  </div>
+                                </div>
+                                <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                                  <div className="text-xs text-gray-500">ETH Dominance</div>
+                                  <div className="text-lg font-bold text-blue-500">
+                                    {log.details.eth_dominance?.toFixed(1) || 'N/A'}%
+                                  </div>
+                                </div>
+                                <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                                  <div className="text-xs text-gray-500">Total Market Cap</div>
+                                  <div className="text-lg font-bold text-gray-900 dark:text-white">
+                                    ${log.details.total_market_cap ? (log.details.total_market_cap / 1e12).toFixed(2) : '0'}T
+                                  </div>
+                                </div>
+                                <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                                  <div className="text-xs text-gray-500">24h Change</div>
+                                  <div className={cn(
+                                    "text-lg font-bold",
+                                    (log.details.market_cap_change_24h || 0) >= 0 ? "text-green-500" : "text-red-500"
+                                  )}>
+                                    {(log.details.market_cap_change_24h || 0) >= 0 ? '+' : ''}{log.details.market_cap_change_24h?.toFixed(2) || '0'}%
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* 24h Volume */}
+                            <div className="bg-gray-200 dark:bg-gray-800 rounded-lg p-3">
+                              <div className="flex items-center gap-2 mb-2">
+                                <BarChart3 className="w-4 h-4 text-purple-500" />
+                                <span className="text-xs font-semibold text-gray-500 uppercase">Trading Volume</span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-3 text-sm">
+                                <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                                  <div className="text-xs text-gray-500">24h Volume</div>
+                                  <div className="text-lg font-bold text-gray-900 dark:text-white">
+                                    ${log.details.total_volume_24h ? (log.details.total_volume_24h / 1e9).toFixed(1) : '0'}B
+                                  </div>
+                                </div>
+                                <div className="bg-gray-100 dark:bg-gray-900 p-2 rounded">
+                                  <div className="text-xs text-gray-500">Active Cryptos</div>
+                                  <div className="text-lg font-bold text-gray-900 dark:text-white">
+                                    {log.details.active_cryptocurrencies?.toLocaleString() || 'N/A'}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Trending Coins */}
+                            {log.details.trending_coins && log.details.trending_coins.length > 0 && (
+                              <div className="bg-gray-200 dark:bg-gray-800 rounded-lg p-3">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <TrendingUp className="w-4 h-4 text-green-500" />
+                                  <span className="text-xs font-semibold text-gray-500 uppercase">Trending Coins (24h)</span>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  {log.details.trending_coins.slice(0, 7).map((coin: any, idx: number) => (
+                                    <div
+                                      key={coin.id || idx}
+                                      className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-900 rounded-lg"
+                                    >
+                                      <span className="text-xs text-gray-500">#{coin.rank || idx + 1}</span>
+                                      <span className="font-semibold text-gray-900 dark:text-white">{coin.symbol || coin.name}</span>
+                                      {coin.market_cap_rank && (
+                                        <span className="text-xs text-gray-500">MCap #{coin.market_cap_rank}</span>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                                {log.details.tracked_trending && log.details.tracked_trending.length > 0 && (
+                                  <div className="mt-2 text-xs text-yellow-500">
+                                    Your tracked coins trending: {log.details.tracked_trending.join(', ')}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1300,6 +1542,9 @@ export default function BotConsolePage() {
           </span>
           <span className="hidden sm:flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-pink-500" /> {activities.filter(a => a.type === 'sentiment').length}
+          </span>
+          <span className="hidden sm:flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-teal-500" /> {activities.filter(a => a.type === 'global').length}
           </span>
         </div>
         <button
