@@ -208,7 +208,7 @@ export default function Dashboard() {
       {/* Bottom Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Open Positions */}
-        <OpenPositions positions={positions} />
+        <OpenPositions positions={positions} onRefresh={fetchDashboardData} />
 
         {/* Recent Trades */}
         <RecentTrades decisions={recentDecisions} />

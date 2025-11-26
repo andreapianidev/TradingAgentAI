@@ -1,14 +1,35 @@
 'use client'
 
+import { useState } from 'react'
 import { TradingPosition } from '@/lib/supabase'
 import { formatCurrency, formatPercent, formatTimeAgo, cn, getPnlColor, getDirectionBgColor } from '@/lib/utils'
-import { ArrowUpRight, ArrowDownRight, X } from 'lucide-react'
+import { ArrowUpRight, ArrowDownRight, X, RefreshCw } from 'lucide-react'
 
 interface OpenPositionsProps {
   positions: TradingPosition[]
+  onRefresh?: () => void
 }
 
-export default function OpenPositions({ positions }: OpenPositionsProps) {
+export default function OpenPositions({ positions, onRefresh }: OpenPositionsProps) {
+  const [syncing, setSyncing] = useState(false)
+
+  const handleSyncPositions = async () => {
+    setSyncing(true)
+    try {
+      const res = await fetch('/api/positions/sync', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        onRefresh?.()
+      } else {
+        console.error('Sync failed:', data.error)
+      }
+    } catch (error) {
+      console.error('Failed to sync positions:', error)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   const handleClosePosition = async (positionId: string) => {
     try {
       const res = await fetch('/api/positions/close', {
@@ -28,7 +49,18 @@ export default function OpenPositions({ positions }: OpenPositionsProps) {
     <div className="card">
       <div className="card-header">
         <h2 className="card-title">Open Positions</h2>
-        <span className="text-sm text-gray-500 dark:text-gray-400">{positions.length} active</span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-500 dark:text-gray-400">{positions.length} active</span>
+          <button
+            onClick={handleSyncPositions}
+            disabled={syncing}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-colors disabled:opacity-50"
+            title="Sync positions from Alpaca"
+          >
+            <RefreshCw className={cn("w-3.5 h-3.5", syncing && "animate-spin")} />
+            {syncing ? 'Syncing...' : 'Sync Alpaca'}
+          </button>
+        </div>
       </div>
 
       {positions.length === 0 ? (

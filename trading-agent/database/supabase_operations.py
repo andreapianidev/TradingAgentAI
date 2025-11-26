@@ -645,6 +645,197 @@ class SupabaseOperations:
 
         return len(result.data) == 0
 
+    # ============== News (Batch) ==============
+
+    def save_news_batch(self, news_items: List[Dict[str, Any]]) -> int:
+        """
+        Save multiple news items, avoiding duplicates by URL.
+
+        Returns:
+            Number of news items saved
+        """
+        if not news_items:
+            return 0
+
+        saved_count = 0
+        for item in news_items:
+            try:
+                # Check if news already exists by URL
+                url = item.get("url")
+                if url:
+                    existing = self.client.table("trading_news") \
+                        .select("id") \
+                        .eq("url", url) \
+                        .execute()
+
+                    if existing.data:
+                        continue  # Skip duplicate
+
+                # Parse published_at if it's a string
+                published_at = item.get("published_at")
+                if isinstance(published_at, str):
+                    try:
+                        from dateutil import parser
+                        published_at = parser.parse(published_at).isoformat()
+                    except:
+                        published_at = datetime.utcnow().isoformat()
+
+                data = {
+                    "title": item.get("title", "")[:500],
+                    "summary": (item.get("summary") or "")[:1000],
+                    "source": item.get("source", "RSS Feed"),
+                    "url": url,
+                    "published_at": published_at,
+                    "sentiment": item.get("sentiment", "neutral"),
+                    "symbols": item.get("symbols"),
+                    "raw_data": item.get("raw_data")
+                }
+
+                self.client.table("trading_news").insert(data).execute()
+                saved_count += 1
+
+            except Exception as e:
+                logger.debug(f"Error saving news item: {e}")
+                continue
+
+        if saved_count > 0:
+            logger.info(f"Saved {saved_count} news items to database")
+        return saved_count
+
+    # ============== Whale Alerts ==============
+
+    def save_whale_alert(
+        self,
+        symbol: str,
+        amount: float = None,
+        amount_usd: float = None,
+        blockchain: str = None,
+        from_address: str = None,
+        from_type: str = None,
+        to_address: str = None,
+        to_type: str = None,
+        tx_hash: str = None,
+        transaction_time: datetime = None,
+        flow_direction: str = None,
+        raw_data: Dict[str, Any] = None
+    ) -> str:
+        """Save a whale alert transaction."""
+        data = {
+            "symbol": symbol,
+            "amount": amount,
+            "amount_usd": amount_usd,
+            "blockchain": blockchain,
+            "from_address": from_address,
+            "from_type": from_type,
+            "to_address": to_address,
+            "to_type": to_type,
+            "tx_hash": tx_hash,
+            "transaction_time": transaction_time.isoformat() if transaction_time else None,
+            "flow_direction": flow_direction,
+            "raw_data": raw_data
+        }
+
+        result = self.client.table("trading_whale_alerts").insert(data).execute()
+        return result.data[0]["id"]
+
+    def save_whale_alerts_batch(self, alerts: List[Dict[str, Any]]) -> int:
+        """
+        Save multiple whale alerts, avoiding duplicates by tx_hash.
+
+        Returns:
+            Number of alerts saved
+        """
+        if not alerts:
+            return 0
+
+        saved_count = 0
+        for alert in alerts:
+            try:
+                # Check if alert already exists by tx_hash
+                tx_hash = alert.get("hash") or alert.get("tx_hash")
+                if tx_hash:
+                    existing = self.client.table("trading_whale_alerts") \
+                        .select("id") \
+                        .eq("tx_hash", tx_hash) \
+                        .execute()
+
+                    if existing.data:
+                        continue  # Skip duplicate
+
+                # Determine flow direction
+                from_type = alert.get("from_type", "")
+                to_type = alert.get("to_type", "")
+
+                if "exchange" in to_type.lower():
+                    flow_direction = "inflow"
+                elif "exchange" in from_type.lower():
+                    flow_direction = "outflow"
+                else:
+                    flow_direction = "transfer"
+
+                data = {
+                    "symbol": alert.get("symbol", "BTC"),
+                    "amount": alert.get("amount"),
+                    "amount_usd": alert.get("amount_usd"),
+                    "blockchain": alert.get("blockchain"),
+                    "from_type": from_type,
+                    "to_type": to_type,
+                    "tx_hash": tx_hash,
+                    "flow_direction": flow_direction,
+                    "raw_data": alert
+                }
+
+                self.client.table("trading_whale_alerts").insert(data).execute()
+                saved_count += 1
+
+            except Exception as e:
+                logger.debug(f"Error saving whale alert: {e}")
+                continue
+
+        if saved_count > 0:
+            logger.info(f"Saved {saved_count} whale alerts to database")
+        return saved_count
+
+    def save_whale_flow_summary(
+        self,
+        symbol: str,
+        inflow_exchange: float,
+        outflow_exchange: float,
+        net_flow: float,
+        alert_count: int,
+        interpretation: str = None,
+        period_start: datetime = None,
+        period_end: datetime = None
+    ) -> str:
+        """Save a whale flow summary."""
+        data = {
+            "symbol": symbol,
+            "inflow_exchange": inflow_exchange,
+            "outflow_exchange": outflow_exchange,
+            "net_flow": net_flow,
+            "alert_count": alert_count,
+            "interpretation": interpretation,
+            "period_start": period_start.isoformat() if period_start else None,
+            "period_end": period_end.isoformat() if period_end else None
+        }
+
+        result = self.client.table("trading_whale_flow_summary").insert(data).execute()
+        return result.data[0]["id"]
+
+    def get_recent_whale_alerts(
+        self,
+        symbol: str = None,
+        limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """Get recent whale alerts."""
+        query = self.client.table("trading_whale_alerts").select("*")
+
+        if symbol:
+            query = query.eq("symbol", symbol)
+
+        result = query.order("created_at", desc=True).limit(limit).execute()
+        return result.data
+
 
 # Global operations instance
 db_ops = SupabaseOperations()
