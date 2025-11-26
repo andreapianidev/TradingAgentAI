@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { spawn } from 'child_process'
-import path from 'path'
+
+export const dynamic = 'force-dynamic'
 
 function getSupabaseClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -14,139 +14,77 @@ function getSupabaseClient() {
   return createClient(supabaseUrl, supabaseKey)
 }
 
-// Store the bot process globally (in-memory for this server instance)
-declare global {
-  var botProcess: ReturnType<typeof spawn> | null
-  var botCycleId: string | null
-  var botStartedAt: string | null
-}
-
-global.botProcess = global.botProcess || null
-global.botCycleId = global.botCycleId || null
-global.botStartedAt = global.botStartedAt || null
-
 export async function POST() {
   try {
     const supabase = getSupabaseClient()
+    const githubToken = process.env.GITHUB_TOKEN
+    const repoOwner = process.env.GITHUB_REPO_OWNER || 'andreapianidev'
+    const repoName = process.env.GITHUB_REPO_NAME || 'TradingAgentAI'
+    const workflowId = process.env.GITHUB_WORKFLOW_ID || 'trading-bot.yml'
 
-    // Check if bot is already running
-    if (global.botProcess && !global.botProcess.killed) {
+    if (!githubToken) {
       return NextResponse.json({
         success: false,
-        error: 'Bot is already running',
-        isRunning: true,
-        cycleId: global.botCycleId
-      }, { status: 400 })
+        error: 'GitHub token not configured. Add GITHUB_TOKEN to environment variables.',
+      }, { status: 500 })
+    }
+
+    // Trigger GitHub Actions workflow
+    const response = await fetch(
+      `https://api.github.com/repos/${repoOwner}/${repoName}/actions/workflows/${workflowId}/dispatches`,
+      {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'Authorization': `Bearer ${githubToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ref: 'main'
+        })
+      }
+    )
+
+    if (!response.ok && response.status !== 204) {
+      const error = await response.text()
+      console.error('GitHub API error:', error)
+      return NextResponse.json({
+        success: false,
+        error: `Failed to trigger workflow: ${response.status}`
+      }, { status: 500 })
     }
 
     const cycleId = crypto.randomUUID()
     const startedAt = new Date().toISOString()
 
-    // Create cycle record
-    await supabase.from('trading_cycles').insert({
-      id: cycleId,
-      started_at: startedAt,
-      status: 'running',
-      trading_mode: 'paper'
-    })
-
-    // Log bot start
+    // Log the manual trigger
     await supabase.from('trading_bot_logs').insert({
       log_level: 'INFO',
-      message: 'Trading bot started from dashboard',
-      component: 'BotController',
+      message: 'Trading bot manually triggered from dashboard (GitHub Actions)',
+      component: 'Dashboard',
       cycle_id: cycleId,
       trading_mode: 'paper'
     })
 
-    // Path to the trading bot
-    const botPath = path.resolve(process.cwd(), '..', 'trading-agent')
-
-    // Spawn the Python bot process
-    const botProcess = spawn('python', ['main.py'], {
-      cwd: botPath,
-      env: {
-        ...process.env,
-        CYCLE_ID: cycleId,
-        PYTHONUNBUFFERED: '1'
-      },
-      stdio: ['pipe', 'pipe', 'pipe']
-    })
-
-    global.botProcess = botProcess
-    global.botCycleId = cycleId
-    global.botStartedAt = startedAt
-
-    // Handle stdout
-    botProcess.stdout?.on('data', async (data) => {
-      const message = data.toString().trim()
-      if (message) {
-        console.log('[BOT]', message)
-      }
-    })
-
-    // Handle stderr
-    botProcess.stderr?.on('data', async (data) => {
-      const message = data.toString().trim()
-      if (message) {
-        console.error('[BOT ERROR]', message)
-      }
-    })
-
-    // Handle process exit
-    botProcess.on('close', async (code) => {
-      console.log(`Bot process exited with code ${code}`)
-
-      // Update cycle status
-      await supabase
-        .from('trading_cycles')
-        .update({
-          completed_at: new Date().toISOString(),
-          status: code === 0 ? 'completed' : 'error'
-        })
-        .eq('id', cycleId)
-
-      // Log bot stop
-      await supabase.from('trading_bot_logs').insert({
-        log_level: code === 0 ? 'INFO' : 'ERROR',
-        message: `Trading bot stopped with exit code ${code}`,
-        component: 'BotController',
-        cycle_id: cycleId,
-        trading_mode: 'paper'
-      })
-
-      global.botProcess = null
-      global.botCycleId = null
-      global.botStartedAt = null
-    })
-
-    botProcess.on('error', async (error) => {
-      console.error('Bot process error:', error)
-
-      await supabase.from('trading_bot_logs').insert({
-        log_level: 'ERROR',
-        message: `Bot process error: ${error.message}`,
-        component: 'BotController',
-        cycle_id: cycleId,
-        trading_mode: 'paper'
-      })
-
-      global.botProcess = null
-      global.botCycleId = null
-      global.botStartedAt = null
+    // Create alert
+    await supabase.from('trading_alerts').insert({
+      alert_type: 'bot_triggered',
+      severity: 'info',
+      title: 'Bot Triggered Manually',
+      message: 'Trading bot workflow has been triggered on GitHub Actions. It will start within a few seconds.',
+      trading_mode: 'paper'
     })
 
     return NextResponse.json({
       success: true,
-      isRunning: true,
-      cycleId,
+      message: 'Trading bot triggered on GitHub Actions',
       startedAt,
-      message: 'Trading bot started successfully'
+      note: 'The workflow typically starts within 10-30 seconds'
     })
   } catch (error) {
-    console.error('Error starting bot:', error)
+    console.error('Error triggering bot:', error)
     return NextResponse.json(
-      { success: false, error: 'Failed to start trading bot' },
+      { success: false, error: 'Failed to trigger trading bot' },
       { status: 500 }
     )
   }

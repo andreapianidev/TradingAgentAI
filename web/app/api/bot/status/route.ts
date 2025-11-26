@@ -14,13 +14,83 @@ function getSupabaseClient() {
   return createClient(supabaseUrl, supabaseKey)
 }
 
+interface WorkflowRun {
+  id: number
+  status: string
+  conclusion: string | null
+  created_at: string
+  updated_at: string
+  run_started_at: string
+  html_url: string
+}
+
 export async function GET() {
   try {
     const supabase = getSupabaseClient()
-    // Check if bot process is running
-    const isRunning = global.botProcess && !global.botProcess.killed
+    const githubToken = process.env.GITHUB_TOKEN
+    const repoOwner = process.env.GITHUB_REPO_OWNER || 'andreapianidev'
+    const repoName = process.env.GITHUB_REPO_NAME || 'TradingAgentAI'
+    const workflowId = process.env.GITHUB_WORKFLOW_ID || 'trading-bot.yml'
 
-    // Get latest portfolio snapshot
+    let workflowStatus = {
+      isRunning: false,
+      lastRun: null as WorkflowRun | null,
+      nextScheduledRun: null as string | null,
+      error: null as string | null
+    }
+
+    // Fetch workflow runs from GitHub
+    if (githubToken) {
+      try {
+        const response = await fetch(
+          `https://api.github.com/repos/${repoOwner}/${repoName}/actions/workflows/${workflowId}/runs?per_page=5`,
+          {
+            headers: {
+              'Accept': 'application/vnd.github.v3+json',
+              'Authorization': `Bearer ${githubToken}`,
+            },
+            next: { revalidate: 30 } // Cache for 30 seconds
+          }
+        )
+
+        if (response.ok) {
+          const data = await response.json()
+          const runs = data.workflow_runs || []
+
+          if (runs.length > 0) {
+            const latestRun = runs[0]
+            workflowStatus.lastRun = {
+              id: latestRun.id,
+              status: latestRun.status,
+              conclusion: latestRun.conclusion,
+              created_at: latestRun.created_at,
+              updated_at: latestRun.updated_at,
+              run_started_at: latestRun.run_started_at,
+              html_url: latestRun.html_url
+            }
+            workflowStatus.isRunning = latestRun.status === 'in_progress' || latestRun.status === 'queued'
+          }
+
+          // Calculate next scheduled run (every 15 minutes)
+          const now = new Date()
+          const minutes = now.getMinutes()
+          const nextRunMinutes = Math.ceil(minutes / 15) * 15
+          const nextRun = new Date(now)
+          nextRun.setMinutes(nextRunMinutes, 0, 0)
+          if (nextRun <= now) {
+            nextRun.setMinutes(nextRun.getMinutes() + 15)
+          }
+          workflowStatus.nextScheduledRun = nextRun.toISOString()
+        }
+      } catch (ghError) {
+        console.error('GitHub API error:', ghError)
+        workflowStatus.error = 'Failed to fetch GitHub workflow status'
+      }
+    } else {
+      workflowStatus.error = 'GITHUB_TOKEN not configured'
+    }
+
+    // Get latest portfolio snapshot from Supabase
     const { data: snapshot } = await supabase
       .from('trading_portfolio_snapshots')
       .select('*')
@@ -34,36 +104,20 @@ export async function GET() {
       .select('*', { count: 'exact', head: true })
       .eq('status', 'open')
 
-    // Get latest cycle info if bot is running
-    let currentCycle = null
-    if (global.botCycleId) {
-      const { data: cycle } = await supabase
-        .from('trading_cycles')
-        .select('*')
-        .eq('id', global.botCycleId)
-        .single()
-      currentCycle = cycle
-    }
-
-    // Get the current symbol being analyzed (from latest log)
-    let currentSymbol = null
-    if (isRunning) {
-      const { data: latestLog } = await supabase
-        .from('trading_bot_logs')
-        .select('symbol')
-        .not('symbol', 'is', null)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
-      currentSymbol = latestLog?.symbol
-    }
+    // Get latest cycle
+    const { data: latestCycle } = await supabase
+      .from('trading_cycles')
+      .select('*')
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .single()
 
     return NextResponse.json({
-      isRunning: !!isRunning,
-      cycleId: global.botCycleId,
-      startedAt: global.botStartedAt,
-      currentSymbol,
-      currentCycle,
+      workflow: workflowStatus,
+      isRunning: workflowStatus.isRunning,
+      lastRun: workflowStatus.lastRun,
+      nextScheduledRun: workflowStatus.nextScheduledRun,
+      latestCycle,
       portfolio: snapshot ? {
         equity: snapshot.total_equity_usdc || 0,
         available: snapshot.available_balance_usdc || 0,
