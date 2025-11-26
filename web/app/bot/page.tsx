@@ -117,8 +117,10 @@ export default function BotConsolePage() {
 
       // Add market contexts
       markets?.forEach(m => {
-        const forecast = m.prophet_forecast?.trend || 'N/A'
-        const rsi = m.technical_indicators?.rsi?.toFixed(1) || 'N/A'
+        // Use correct column names from trading_market_contexts table
+        const forecast = m.forecast_trend || 'N/A'
+        const rsi = m.rsi ? parseFloat(m.rsi).toFixed(1) : 'N/A'
+        const price = m.price ? parseFloat(m.price) : 0
 
         logs.push({
           id: `market-${m.id}`,
@@ -126,13 +128,14 @@ export default function BotConsolePage() {
           type: 'market',
           level: 'info',
           symbol: m.symbol,
-          message: `${m.symbol} Analysis: $${parseFloat(m.current_price || 0).toLocaleString()} | RSI: ${rsi} | Forecast: ${forecast}`,
+          message: `${m.symbol} Analysis: $${price.toLocaleString()} | RSI: ${rsi} | Forecast: ${forecast}`,
           details: {
-            price: m.current_price,
+            price: m.price,
             change_24h: m.price_change_24h,
-            technical: m.technical_indicators,
-            pivot_points: m.pivot_points,
-            prophet: m.prophet_forecast
+            rsi: m.rsi,
+            macd: m.macd,
+            forecast_trend: m.forecast_trend,
+            forecast_target: m.forecast_target_price
           }
         })
       })

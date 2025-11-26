@@ -94,8 +94,12 @@ class SupabaseHandler(logging.Handler):
             return
 
         try:
-            # Extract component name from logger name (truncate to 50 chars for DB constraint)
-            component = record.name.replace("trading_agent.", "") if record.name else "main"
+            # Extract component name from logger name
+            # Strip ANSI codes that may have been added by ColoredFormatter
+            import re
+            ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+            raw_name = ansi_escape.sub('', record.name) if record.name else "main"
+            component = raw_name.replace("trading_agent.", "")
             component = component[:50] if len(component) > 50 else component
 
             # Use levelno to get clean level name (avoids ANSI codes from ColoredFormatter)
