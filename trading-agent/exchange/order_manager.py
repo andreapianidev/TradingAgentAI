@@ -11,6 +11,7 @@ from config.constants import (
     EXECUTION_EXECUTED, EXECUTION_FAILED, EXECUTION_SKIPPED,
     EXIT_SIGNAL_REVERSAL
 )
+from exchange.exchange_factory import get_exchange_client
 from utils.logger import get_logger, log_execution
 
 logger = get_logger(__name__)
@@ -20,17 +21,14 @@ class OrderManager:
     """Manages order execution and tracking."""
 
     def __init__(self):
-        """Initialize the order manager with appropriate client based on mode."""
-        if settings.PAPER_TRADING:
-            from exchange.paper_trading import paper_client
-            self.client = paper_client
-            self.is_paper_trading = True
-            logger.info("OrderManager initialized in PAPER TRADING mode")
-        else:
-            from exchange.hyperliquid_client import exchange_client
-            self.client = exchange_client
-            self.is_paper_trading = False
-            logger.info("OrderManager initialized in LIVE TRADING mode")
+        """Initialize the order manager with appropriate client based on exchange settings."""
+        # Use exchange_factory to get the correct client based on EXCHANGE setting
+        self.client = get_exchange_client(auto_connect=False)
+        self.is_paper_trading = settings.PAPER_TRADING or settings.ALPACA_PAPER_TRADING
+
+        exchange_name = settings.EXCHANGE.lower()
+        mode = "PAPER" if self.is_paper_trading else "LIVE"
+        logger.info(f"OrderManager initialized in {mode} TRADING mode (Exchange: {exchange_name})")
 
     def execute_decision(
         self,
