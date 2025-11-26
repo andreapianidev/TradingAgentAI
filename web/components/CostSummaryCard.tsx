@@ -39,17 +39,17 @@ export default function CostSummaryCard() {
 
       if (todayData) {
         const llmCosts = todayData
-          .filter((c: TradingCost) => c.cost_type === 'llm')
-          .reduce((sum: number, c: TradingCost) => sum + Number(c.cost_usd), 0)
+          .filter((c) => c.cost_type === 'llm')
+          .reduce((sum, c) => sum + Number(c.cost_usd), 0)
         const feeCosts = todayData
-          .filter((c: TradingCost) => c.cost_type === 'trading_fee')
-          .reduce((sum: number, c: TradingCost) => sum + Number(c.cost_usd), 0)
+          .filter((c) => c.cost_type === 'trading_fee')
+          .reduce((sum, c) => sum + Number(c.cost_usd), 0)
 
         setTodayCosts({
           total: llmCosts + feeCosts,
           llm: llmCosts,
           fees: feeCosts,
-          llmCalls: todayData.filter((c: TradingCost) => c.cost_type === 'llm').length
+          llmCalls: todayData.filter((c) => c.cost_type === 'llm').length
         })
       } else {
         setTodayCosts({ total: 0, llm: 0, fees: 0, llmCalls: 0 })

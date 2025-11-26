@@ -280,3 +280,76 @@ export interface TradingCostSummary {
   cost_by_symbol?: Record<string, { llm: number; fees: number }>
   trading_mode: 'paper' | 'live'
 }
+
+export interface TradingMarketGlobal {
+  id: string
+  created_at: string
+  timestamp: string
+  btc_dominance?: number
+  eth_dominance?: number
+  total_market_cap_usd?: number
+  total_volume_24h_usd?: number
+  market_cap_change_24h_pct?: number
+  active_cryptocurrencies?: number
+  trending_coins?: any
+  trending_symbols?: string[]
+  tracked_trending?: string[]
+}
+
+export interface TradingDailyStats {
+  id: string
+  created_at: string
+  date: string
+  total_trades: number
+  winning_trades: number
+  losing_trades: number
+  daily_pnl: number
+  daily_pnl_pct: number
+  total_volume_usdc: number
+  starting_equity?: number
+  ending_equity?: number
+  stats_by_symbol?: any
+  trading_mode: 'paper' | 'live'
+}
+
+export interface TradingDrawdownTracking {
+  id: string
+  created_at: string
+  date: string
+  starting_equity?: number
+  current_equity?: number
+  daily_pnl?: number
+  daily_drawdown_pct?: number
+  weekly_drawdown_pct?: number
+  trading_halted: boolean
+  halt_reason?: string
+  trading_mode: 'paper' | 'live'
+}
+
+export interface TradingForecastPerformance {
+  id: string
+  created_at: string
+  symbol: string
+  forecast_horizon: string
+  predicted_price?: number
+  actual_price?: number
+  prediction_timestamp?: string
+  evaluation_timestamp?: string
+  mape?: number
+  direction_correct?: boolean
+  hyperparameters?: any
+  trading_mode: 'paper' | 'live'
+}
+
+export interface TradingBotLog {
+  id: string
+  created_at: string
+  log_level: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL'
+  message: string
+  component?: string
+  symbol?: string
+  cycle_id?: string
+  details?: any
+  error_stack?: string
+  trading_mode: 'paper' | 'live'
+}

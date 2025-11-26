@@ -1361,20 +1361,45 @@ export default function BotConsolePage() {
                             </div>
                           </div>
                         )}
-                        {log.type === 'news' && log.details.summary && (
-                          <div className="mb-3">
-                            <div className="text-xs text-gray-500 mb-1">Summary:</div>
-                            <p className="text-sm text-gray-700 dark:text-gray-300">{log.details.summary}</p>
-                            {log.details.source && (
-                              <p className="text-xs text-gray-500 mt-2">Source: {log.details.source}</p>
+                        {log.type === 'news' && (
+                          <div className="mb-3 space-y-2">
+                            {/* Sentiment and Source row */}
+                            <div className="flex items-center gap-3">
+                              <span className={cn(
+                                "px-2 py-1 rounded text-xs font-medium uppercase",
+                                log.details.sentiment === 'positive' && "bg-green-500/20 text-green-400",
+                                log.details.sentiment === 'negative' && "bg-red-500/20 text-red-400",
+                                log.details.sentiment === 'neutral' && "bg-gray-500/20 text-gray-400"
+                              )}>
+                                {log.details.sentiment === 'positive' ? '📈 Positive' :
+                                 log.details.sentiment === 'negative' ? '📉 Negative' : '📊 Neutral'}
+                              </span>
+                              {log.details.source && (
+                                <span className="text-xs text-gray-500">
+                                  Source: <span className="text-gray-400">{log.details.source}</span>
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Summary */}
+                            {log.details.summary && (
+                              <div>
+                                <div className="text-xs text-gray-500 mb-1">Summary:</div>
+                                <p className="text-sm text-gray-700 dark:text-gray-300">{log.details.summary}</p>
+                              </div>
                             )}
+
+                            {/* Related symbols */}
                             {log.details.symbols && log.details.symbols.length > 0 && (
-                              <div className="flex gap-1 mt-2">
-                                {log.details.symbols.map((s: string) => (
-                                  <span key={s} className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-800 rounded text-xs">
-                                    {s}
-                                  </span>
-                                ))}
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-gray-500">Related:</span>
+                                <div className="flex gap-1">
+                                  {log.details.symbols.map((s: string) => (
+                                    <span key={s} className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-800 rounded text-xs font-mono">
+                                      {s}
+                                    </span>
+                                  ))}
+                                </div>
                               </div>
                             )}
                           </div>
