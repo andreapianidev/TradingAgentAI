@@ -111,6 +111,33 @@ export default function MarketPage() {
     return 'text-yellow-400'
   }
 
+  // Get emoji based on sentiment score and label
+  const getSentimentEmoji = (score: number, label: string) => {
+    if (score <= 20 || label === 'EXTREME FEAR') return { emoji: '😱', description: 'Extreme Fear - Maximum pessimism', animation: 'animate-bounce' }
+    if (score <= 40 || label === 'FEAR') return { emoji: '😰', description: 'Fear - Investors are worried', animation: 'animate-pulse' }
+    if (score <= 60 || label === 'NEUTRAL') return { emoji: '😐', description: 'Neutral - Market indecision', animation: '' }
+    if (score <= 80 || label === 'GREED') return { emoji: '😊', description: 'Greed - Investors are optimistic', animation: 'animate-pulse' }
+    return { emoji: '🤑', description: 'Extreme Greed - Maximum optimism', animation: 'animate-bounce' }
+  }
+
+  // Get sentiment background gradient
+  const getSentimentGradient = (score: number) => {
+    if (score <= 20) return 'from-red-600 to-red-500'
+    if (score <= 40) return 'from-orange-500 to-red-500'
+    if (score <= 60) return 'from-yellow-500 to-orange-500'
+    if (score <= 80) return 'from-green-500 to-yellow-500'
+    return 'from-green-400 to-green-600'
+  }
+
+  // Get sentiment zone label
+  const getSentimentZone = (score: number) => {
+    if (score <= 20) return 'Extreme Fear Zone'
+    if (score <= 40) return 'Fear Zone'
+    if (score <= 60) return 'Neutral Zone'
+    if (score <= 80) return 'Greed Zone'
+    return 'Extreme Greed Zone'
+  }
+
   const getOutlookIcon = (outlook: string) => {
     switch (outlook) {
       case 'bullish': return <TrendingUp className="w-5 h-5 text-green-400" />
@@ -695,55 +722,166 @@ export default function MarketPage() {
               </div>
             </div>
 
-            {/* Sentiment & Forecast */}
+            {/* Sentiment & Forecast - ENHANCED */}
             <div className="card group hover:border-pink-500/40 card-hover-lift shimmer-effect">
               <div className="card-header">
                 <h3 className="card-title flex items-center gap-2">
                   <div className="p-2 rounded-lg bg-pink-500/10 group-hover:bg-pink-500/20 group-hover:scale-110 group-hover:-rotate-6 transition-all duration-300">
                     <Activity className="w-5 h-5 text-pink-400 group-hover:text-pink-300" />
                   </div>
-                  <span className="group-hover:tracking-wide transition-all duration-300">Sentiment & Forecast</span>
+                  <span className="group-hover:tracking-wide transition-all duration-300">Market Sentiment</span>
                 </h3>
               </div>
               <div className="space-y-4">
-                <div>
-                  <div className="text-gray-400 text-sm">Fear & Greed Index</div>
-                  <div className={cn('text-3xl font-bold mt-1', getSentimentColor(ctx.sentiment_label || 'NEUTRAL'))}>
-                    {ctx.sentiment_score || 50}
-                  </div>
-                  <div className={cn(
-                    'text-sm px-3 py-1 rounded-full inline-block mt-1',
-                    ctx.sentiment_label?.includes('GREED') ? 'bg-green-500/20 text-green-400' :
-                    ctx.sentiment_label?.includes('FEAR') ? 'bg-red-500/20 text-red-400' :
-                    'bg-yellow-500/20 text-yellow-400'
-                  )}>
-                    {ctx.sentiment_label || 'NEUTRAL'}
-                  </div>
-                </div>
-                <div className="pt-3 border-t border-gray-700/50">
-                  <div className="text-gray-400 text-sm">Prophet Forecast (4h)</div>
-                  <div className={cn(
-                    'text-lg font-bold mt-1 flex items-center gap-2',
-                    ctx.forecast_trend === 'bullish' ? 'text-green-400' :
-                    ctx.forecast_trend === 'bearish' ? 'text-red-400' : 'text-gray-400'
-                  )}>
-                    {ctx.forecast_trend === 'bullish' && <TrendingUp className="w-5 h-5" />}
-                    {ctx.forecast_trend === 'bearish' && <TrendingDown className="w-5 h-5" />}
-                    {ctx.forecast_trend?.toUpperCase() || 'LATERAL'}
-                  </div>
-                  {ctx.forecast_target_price && (
-                    <div className="text-sm text-gray-400 mt-1">
-                      Target: <span className="text-white font-medium">
-                        {formatCurrency(parseFloat(String(ctx.forecast_target_price)))}
-                      </span>
-                      <span className={cn(
-                        'ml-2',
-                        (ctx.forecast_change_pct || 0) >= 0 ? 'text-green-400' : 'text-red-400'
+                {/* Main Sentiment Display with Emoji */}
+                {(() => {
+                  const score = ctx.sentiment_score || 50
+                  const label = ctx.sentiment_label || 'NEUTRAL'
+                  const sentimentData = getSentimentEmoji(score, label)
+
+                  return (
+                    <>
+                      {/* Emoji and Score Row */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          {/* Large Animated Emoji */}
+                          <div className={cn(
+                            "text-5xl transition-transform duration-300 group-hover:scale-110 cursor-default select-none",
+                            sentimentData.animation
+                          )}>
+                            {sentimentData.emoji}
+                          </div>
+                          <div>
+                            <div className="text-gray-400 text-xs uppercase tracking-wide">Fear & Greed Index</div>
+                            <div className={cn(
+                              'text-4xl font-bold mt-0.5 transition-all duration-300',
+                              getSentimentColor(label)
+                            )}>
+                              {score}
+                            </div>
+                          </div>
+                        </div>
+                        {/* Label Badge */}
+                        <div className={cn(
+                          'px-3 py-1.5 rounded-lg text-sm font-bold uppercase tracking-wider transition-all duration-300',
+                          'hover:scale-105 cursor-default',
+                          label.includes('EXTREME GREED') ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
+                          label.includes('GREED') ? 'bg-green-500/15 text-green-400 border border-green-500/20' :
+                          label.includes('EXTREME FEAR') ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                          label.includes('FEAR') ? 'bg-red-500/15 text-red-400 border border-red-500/20' :
+                          'bg-yellow-500/15 text-yellow-400 border border-yellow-500/20'
+                        )}>
+                          {label}
+                        </div>
+                      </div>
+
+                      {/* Description */}
+                      <div className="text-sm text-gray-400 bg-gray-800/50 px-3 py-2 rounded-lg">
+                        {sentimentData.description}
+                      </div>
+
+                      {/* Sentiment Progress Bar */}
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-xs text-gray-500">
+                          <span>😱 Extreme Fear</span>
+                          <span className="text-gray-400 font-medium">{getSentimentZone(score)}</span>
+                          <span>Extreme Greed 🤑</span>
+                        </div>
+                        <div className="relative h-4 bg-gray-800 rounded-full overflow-hidden">
+                          {/* Gradient Background */}
+                          <div className="absolute inset-0 flex">
+                            <div className="w-[20%] bg-gradient-to-r from-red-600 to-red-500" />
+                            <div className="w-[20%] bg-gradient-to-r from-red-500 to-orange-500" />
+                            <div className="w-[20%] bg-gradient-to-r from-orange-500 to-yellow-500" />
+                            <div className="w-[20%] bg-gradient-to-r from-yellow-500 to-green-500" />
+                            <div className="w-[20%] bg-gradient-to-r from-green-500 to-green-400" />
+                          </div>
+                          {/* Indicator Marker */}
+                          <div
+                            className="absolute top-0 h-full w-1 bg-white rounded-full shadow-lg shadow-white/50 transition-all duration-500"
+                            style={{ left: `calc(${score}% - 2px)` }}
+                          />
+                          {/* Glow on indicator */}
+                          <div
+                            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.8)] transition-all duration-500"
+                            style={{ left: `calc(${score}% - 6px)` }}
+                          />
+                        </div>
+                        {/* Scale markers */}
+                        <div className="flex justify-between text-[10px] text-gray-600 px-1">
+                          <span>0</span>
+                          <span>25</span>
+                          <span>50</span>
+                          <span>75</span>
+                          <span>100</span>
+                        </div>
+                      </div>
+
+                      {/* What this means */}
+                      <div className={cn(
+                        'p-3 rounded-lg border text-sm',
+                        score <= 25 ? 'bg-red-500/5 border-red-500/20 text-red-300' :
+                        score <= 45 ? 'bg-orange-500/5 border-orange-500/20 text-orange-300' :
+                        score <= 55 ? 'bg-yellow-500/5 border-yellow-500/20 text-yellow-300' :
+                        score <= 75 ? 'bg-green-500/5 border-green-500/20 text-green-300' :
+                        'bg-green-500/10 border-green-500/30 text-green-300'
                       )}>
-                        ({formatPercent(parseFloat(String(ctx.forecast_change_pct || 0)))})
-                      </span>
+                        <div className="font-medium mb-1 flex items-center gap-2">
+                          💡 Trading Insight
+                        </div>
+                        <div className="text-gray-400">
+                          {score <= 25 ?
+                            'Extreme fear often indicates a potential buying opportunity as markets may be oversold.' :
+                          score <= 45 ?
+                            'Fear in the market - historically, this can precede price recoveries.' :
+                          score <= 55 ?
+                            'Market is neutral - wait for clearer signals before making major moves.' :
+                          score <= 75 ?
+                            'Greed is rising - consider taking some profits and be cautious.' :
+                            'Extreme greed often precedes corrections - high risk of pullback.'
+                          }
+                        </div>
+                      </div>
+                    </>
+                  )
+                })()}
+
+                {/* Forecast Section */}
+                <div className="pt-4 border-t border-gray-700/50">
+                  <div className="text-gray-400 text-sm mb-2">Prophet AI Forecast (4h)</div>
+                  <div className={cn(
+                    'flex items-center justify-between p-3 rounded-lg',
+                    ctx.forecast_trend === 'bullish' ? 'bg-green-500/10 border border-green-500/20' :
+                    ctx.forecast_trend === 'bearish' ? 'bg-red-500/10 border border-red-500/20' :
+                    'bg-gray-500/10 border border-gray-500/20'
+                  )}>
+                    <div className={cn(
+                      'text-lg font-bold flex items-center gap-2',
+                      ctx.forecast_trend === 'bullish' ? 'text-green-400' :
+                      ctx.forecast_trend === 'bearish' ? 'text-red-400' : 'text-gray-400'
+                    )}>
+                      {ctx.forecast_trend === 'bullish' && <TrendingUp className="w-5 h-5" />}
+                      {ctx.forecast_trend === 'bearish' && <TrendingDown className="w-5 h-5" />}
+                      {ctx.forecast_trend === 'bullish' && '📈'}
+                      {ctx.forecast_trend === 'bearish' && '📉'}
+                      {!ctx.forecast_trend && '➡️'}
+                      {ctx.forecast_trend?.toUpperCase() || 'LATERAL'}
                     </div>
-                  )}
+                    {ctx.forecast_target_price && (
+                      <div className="text-right">
+                        <div className="text-xs text-gray-500">Target Price</div>
+                        <div className="text-white font-medium">
+                          {formatCurrency(parseFloat(String(ctx.forecast_target_price)))}
+                          <span className={cn(
+                            'ml-2 text-sm',
+                            (ctx.forecast_change_pct || 0) >= 0 ? 'text-green-400' : 'text-red-400'
+                          )}>
+                            ({(ctx.forecast_change_pct || 0) >= 0 ? '+' : ''}{formatPercent(parseFloat(String(ctx.forecast_change_pct || 0)))})
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
