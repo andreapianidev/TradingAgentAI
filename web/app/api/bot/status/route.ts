@@ -36,10 +36,11 @@ export async function GET() {
       isRunning: false,
       lastRun: null as WorkflowRun | null,
       nextScheduledRun: null as string | null,
-      error: null as string | null
+      error: null as string | null,
+      configured: !!githubToken
     }
 
-    // Fetch workflow runs from GitHub
+    // Fetch workflow runs from GitHub (optional - works without token)
     if (githubToken) {
       try {
         const response = await fetch(
@@ -49,7 +50,7 @@ export async function GET() {
               'Accept': 'application/vnd.github.v3+json',
               'Authorization': `Bearer ${githubToken}`,
             },
-            next: { revalidate: 30 } // Cache for 30 seconds
+            cache: 'no-store'
           }
         )
 
@@ -70,25 +71,23 @@ export async function GET() {
             }
             workflowStatus.isRunning = latestRun.status === 'in_progress' || latestRun.status === 'queued'
           }
-
-          // Calculate next scheduled run (every 15 minutes)
-          const now = new Date()
-          const minutes = now.getMinutes()
-          const nextRunMinutes = Math.ceil(minutes / 15) * 15
-          const nextRun = new Date(now)
-          nextRun.setMinutes(nextRunMinutes, 0, 0)
-          if (nextRun <= now) {
-            nextRun.setMinutes(nextRun.getMinutes() + 15)
-          }
-          workflowStatus.nextScheduledRun = nextRun.toISOString()
         }
       } catch (ghError) {
         console.error('GitHub API error:', ghError)
         workflowStatus.error = 'Failed to fetch GitHub workflow status'
       }
-    } else {
-      workflowStatus.error = 'GITHUB_TOKEN not configured'
     }
+
+    // Calculate next scheduled run (every 15 minutes)
+    const now = new Date()
+    const minutes = now.getMinutes()
+    const nextRunMinutes = Math.ceil(minutes / 15) * 15
+    const nextRun = new Date(now)
+    nextRun.setMinutes(nextRunMinutes, 0, 0)
+    if (nextRun <= now) {
+      nextRun.setMinutes(nextRun.getMinutes() + 15)
+    }
+    workflowStatus.nextScheduledRun = nextRun.toISOString()
 
     // Get latest portfolio snapshot from Supabase
     const { data: snapshot } = await supabase
@@ -112,12 +111,20 @@ export async function GET() {
       .limit(1)
       .single()
 
+    // Get recent bot logs
+    const { data: recentLogs } = await supabase
+      .from('trading_bot_logs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(10)
+
     return NextResponse.json({
       workflow: workflowStatus,
       isRunning: workflowStatus.isRunning,
       lastRun: workflowStatus.lastRun,
       nextScheduledRun: workflowStatus.nextScheduledRun,
       latestCycle,
+      recentLogs,
       portfolio: snapshot ? {
         equity: snapshot.total_equity_usdc || 0,
         available: snapshot.available_balance_usdc || 0,
