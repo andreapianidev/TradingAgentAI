@@ -89,13 +89,13 @@ export async function GET() {
     }
     workflowStatus.nextScheduledRun = nextRun.toISOString()
 
-    // Get latest portfolio snapshot from Supabase
+    // Get latest portfolio snapshot from Supabase (use maybeSingle to avoid errors on empty)
     const { data: snapshot } = await supabase
       .from('trading_portfolio_snapshots')
       .select('*')
       .order('timestamp', { ascending: false })
       .limit(1)
-      .single()
+      .maybeSingle()
 
     // Get open positions count
     const { count: openPositions } = await supabase
@@ -103,13 +103,13 @@ export async function GET() {
       .select('*', { count: 'exact', head: true })
       .eq('status', 'open')
 
-    // Get latest cycle
+    // Get latest cycle (use maybeSingle to handle empty table gracefully)
     const { data: latestCycle } = await supabase
       .from('trading_cycles')
       .select('*')
       .order('started_at', { ascending: false })
       .limit(1)
-      .single()
+      .maybeSingle()
 
     // Get recent bot logs
     const { data: recentLogs } = await supabase

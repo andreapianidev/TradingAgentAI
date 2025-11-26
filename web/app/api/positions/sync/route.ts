@@ -92,6 +92,17 @@ async function fetchAlpacaAccount(): Promise<AlpacaAccount> {
 
 export async function POST() {
   try {
+    // Check if Alpaca credentials are available
+    if (!ALPACA_API_KEY || !ALPACA_SECRET_KEY) {
+      // Return gracefully - credentials not configured on this environment
+      return NextResponse.json({
+        success: false,
+        error: 'Alpaca credentials not configured. Position sync is only available when running the bot.',
+        message: 'This is expected on Vercel - the bot syncs positions when running on GitHub Actions.',
+        configured: false
+      }, { status: 200 }) // Use 200 to avoid console errors
+    }
+
     const supabase = getSupabaseClient()
 
     // Fetch positions from Alpaca

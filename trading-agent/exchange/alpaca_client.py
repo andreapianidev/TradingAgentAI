@@ -542,7 +542,9 @@ class AlpacaClient:
                 raise ValueError(f"Invalid price for {symbol}: {current_price}")
 
             # Calculate position size (notional value)
-            position_value = available * (size_pct / 100)
+            # Use 99% of calculated value to avoid "insufficient balance" errors
+            # due to price fluctuations between fetch and order execution
+            position_value = available * (size_pct / 100) * 0.99
             quantity = position_value / current_price
 
             # Determine order side

@@ -113,24 +113,56 @@ export default function BotConsolePage() {
         const isOpen = d.action?.toLowerCase() === 'open'
         const isClose = d.action?.toLowerCase() === 'close'
         const direction = d.direction?.toUpperCase()
+        const execStatus = d.execution_status?.toLowerCase()
+
+        // Determine log level based on execution status
+        let level: 'info' | 'success' | 'warning' | 'error' = 'info'
+        if (execStatus === 'executed') level = 'success'
+        else if (execStatus === 'failed') level = 'error'
+        else if (execStatus === 'skipped') level = 'warning'
+        else if (d.action === 'HOLD' || d.action === 'hold') level = 'info'
+
+        // Build status indicator
+        const statusIcon = execStatus === 'executed' ? '✅'
+          : execStatus === 'failed' ? '❌'
+          : execStatus === 'skipped' ? '⏭️'
+          : '⏳'
+
+        // Build message with execution status
+        let message = ''
+        if (d.action === 'HOLD' || d.action === 'hold') {
+          message = `HOLD ${d.symbol} - Confidence: ${((d.confidence || 0) * 100).toFixed(0)}%`
+        } else {
+          message = `${statusIcon} ${d.action?.toUpperCase()} ${direction} ${d.symbol} - Confidence: ${((d.confidence || 0) * 100).toFixed(0)}%`
+          if (execStatus === 'executed' && d.entry_price) {
+            message += ` @ $${parseFloat(d.entry_price).toLocaleString()}`
+          }
+          if (execStatus === 'failed') {
+            const errorMsg = d.execution_details?.error || 'Unknown error'
+            message += ` [FAILED: ${errorMsg}]`
+          }
+        }
 
         logs.push({
           id: `decision-${d.id}`,
           timestamp: d.timestamp,
           type: 'decision',
-          level: d.action === 'HOLD' ? 'info' : 'success',
+          level,
           symbol: d.symbol,
           action: d.action,
-          message: d.action === 'HOLD'
-            ? `HOLD ${d.symbol} - Confidence: ${((d.confidence || 0) * 100).toFixed(0)}%`
-            : `${d.action} ${direction} ${d.symbol} - Confidence: ${((d.confidence || 0) * 100).toFixed(0)}%`,
+          message,
           details: {
             reasoning: d.reasoning,
             confidence: d.confidence,
+            execution_status: d.execution_status,
+            execution_details: d.execution_details,
             entry_price: d.entry_price,
-            stop_loss: d.stop_loss,
-            take_profit: d.take_profit,
-            position_size_pct: d.position_size_pct
+            entry_quantity: d.entry_quantity,
+            order_id: d.order_id,
+            stop_loss_pct: d.stop_loss_pct,
+            take_profit_pct: d.take_profit_pct,
+            position_size_pct: d.position_size_pct,
+            leverage: d.leverage
           }
         })
       })
@@ -502,11 +534,81 @@ export default function BotConsolePage() {
                     {/* Expanded Details */}
                     {log.details && expandedLogs.has(log.id) && (
                       <div className="ml-6 mt-1 mb-2 p-3 bg-gray-100 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
-                        {log.type === 'decision' && log.details.reasoning && (
-                          <div className="mb-3">
-                            <div className="text-xs text-gray-500 mb-1">LLM Reasoning:</div>
-                            <p className="text-sm text-gray-700 dark:text-gray-300">{log.details.reasoning}</p>
-                          </div>
+                        {log.type === 'decision' && (
+                          <>
+                            {/* Execution Status Banner */}
+                            {log.details.execution_status && log.details.execution_status !== 'skipped' && (
+                              <div className={cn(
+                                'mb-3 p-2 rounded text-sm font-medium',
+                                log.details.execution_status === 'executed' && 'bg-green-500/10 text-green-400 border border-green-500/20',
+                                log.details.execution_status === 'failed' && 'bg-red-500/10 text-red-400 border border-red-500/20',
+                                log.details.execution_status === 'pending' && 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
+                              )}>
+                                {log.details.execution_status === 'executed' && (
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-2">
+                                      <CheckCircle className="w-4 h-4" />
+                                      <span>Trade Executed Successfully</span>
+                                    </div>
+                                    <div className="text-xs opacity-80 grid grid-cols-2 gap-2 mt-2">
+                                      {log.details.entry_price && <div>Entry: ${parseFloat(log.details.entry_price).toLocaleString()}</div>}
+                                      {log.details.entry_quantity && <div>Qty: {parseFloat(log.details.entry_quantity).toFixed(6)}</div>}
+                                      {log.details.order_id && <div className="col-span-2">Order ID: {log.details.order_id}</div>}
+                                    </div>
+                                  </div>
+                                )}
+                                {log.details.execution_status === 'failed' && (
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-2">
+                                      <AlertCircle className="w-4 h-4" />
+                                      <span>Trade Failed</span>
+                                    </div>
+                                    <div className="text-xs opacity-80 mt-1">
+                                      Error: {log.details.execution_details?.error || 'Unknown error'}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Trade Parameters */}
+                            {(log.details.position_size_pct || log.details.leverage || log.details.stop_loss_pct || log.details.take_profit_pct) && (
+                              <div className="mb-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                                {log.details.position_size_pct && (
+                                  <div className="bg-gray-200 dark:bg-gray-800 p-2 rounded">
+                                    <div className="text-gray-500">Position Size</div>
+                                    <div className="text-gray-900 dark:text-white font-medium">{log.details.position_size_pct}%</div>
+                                  </div>
+                                )}
+                                {log.details.leverage && (
+                                  <div className="bg-gray-200 dark:bg-gray-800 p-2 rounded">
+                                    <div className="text-gray-500">Leverage</div>
+                                    <div className="text-gray-900 dark:text-white font-medium">{log.details.leverage}x</div>
+                                  </div>
+                                )}
+                                {log.details.stop_loss_pct && (
+                                  <div className="bg-gray-200 dark:bg-gray-800 p-2 rounded">
+                                    <div className="text-gray-500">Stop Loss</div>
+                                    <div className="text-red-400 font-medium">-{log.details.stop_loss_pct}%</div>
+                                  </div>
+                                )}
+                                {log.details.take_profit_pct && (
+                                  <div className="bg-gray-200 dark:bg-gray-800 p-2 rounded">
+                                    <div className="text-gray-500">Take Profit</div>
+                                    <div className="text-green-400 font-medium">+{log.details.take_profit_pct}%</div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* LLM Reasoning */}
+                            {log.details.reasoning && (
+                              <div className="mb-3">
+                                <div className="text-xs text-gray-500 mb-1">LLM Reasoning:</div>
+                                <p className="text-sm text-gray-700 dark:text-gray-300">{log.details.reasoning}</p>
+                              </div>
+                            )}
+                          </>
                         )}
                         {log.type === 'news' && log.details.summary && (
                           <div className="mb-3">
