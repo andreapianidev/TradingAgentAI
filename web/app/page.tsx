@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import {
   TrendingUp,
   TrendingDown,
@@ -9,7 +9,8 @@ import {
   Target,
   AlertTriangle,
   ArrowUpRight,
-  ArrowDownRight
+  ArrowDownRight,
+  RefreshCw
 } from 'lucide-react'
 import { formatCurrency, formatPercent, formatTimeAgo, cn, getPnlColor, getDirectionBgColor } from '@/lib/utils'
 import { supabase, TradingPortfolioSnapshot, TradingPosition, TradingDecision, TradingAlert } from '@/lib/supabase'
@@ -17,6 +18,8 @@ import EquityChart from '@/components/EquityChart'
 import RecentTrades from '@/components/RecentTrades'
 import OpenPositions from '@/components/OpenPositions'
 import AlertsPanel from '@/components/AlertsPanel'
+
+const SYNC_INTERVAL = 30000 // 30 seconds
 
 interface DashboardStats {
   totalEquity: number
@@ -37,12 +40,42 @@ export default function Dashboard() {
   const [recentDecisions, setRecentDecisions] = useState<TradingDecision[]>([])
   const [alerts, setAlerts] = useState<TradingAlert[]>([])
   const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState(false)
+  const [lastSync, setLastSync] = useState<Date | null>(null)
 
-  useEffect(() => {
-    fetchDashboardData()
-    const interval = setInterval(fetchDashboardData, 30000) // Refresh every 30s
-    return () => clearInterval(interval)
+  // Sync positions from Alpaca
+  const syncPositions = useCallback(async (showLoading = false) => {
+    if (showLoading) setSyncing(true)
+    try {
+      const res = await fetch('/api/positions/sync', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        setLastSync(new Date())
+      }
+    } catch (error) {
+      console.error('Error syncing positions:', error)
+    } finally {
+      setSyncing(false)
+    }
   }, [])
+
+  // Initial sync and data fetch
+  useEffect(() => {
+    const init = async () => {
+      await syncPositions(true)
+      await fetchDashboardData()
+    }
+    init()
+  }, [])
+
+  // Auto-sync every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      await syncPositions(false)
+      await fetchDashboardData()
+    }, SYNC_INTERVAL)
+    return () => clearInterval(interval)
+  }, [syncPositions])
 
   const fetchDashboardData = async () => {
     try {
@@ -120,6 +153,29 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {/* Sync Status Bar */}
+      <div className="flex items-center justify-between bg-gray-800/50 rounded-lg px-4 py-2 border border-gray-700/50">
+        <div className="flex items-center gap-3">
+          <div className={cn(
+            "w-2 h-2 rounded-full",
+            syncing ? "bg-yellow-500 animate-pulse" : "bg-green-500"
+          )} />
+          <span className="text-sm text-gray-400">
+            {syncing ? 'Syncing with Alpaca...' : lastSync
+              ? `Last sync: ${formatTimeAgo(lastSync.toISOString())}`
+              : 'Connecting to Alpaca...'}
+          </span>
+        </div>
+        <button
+          onClick={() => syncPositions(true)}
+          disabled={syncing}
+          className="text-sm text-gray-400 hover:text-white flex items-center gap-1.5 transition-colors"
+        >
+          <RefreshCw className={cn("w-3.5 h-3.5", syncing && "animate-spin")} />
+          Sync Now
+        </button>
+      </div>
+
       {showAwaitingState && (
         <div className="bg-yellow-100 dark:bg-yellow-500/10 border border-yellow-300 dark:border-yellow-500/20 rounded-lg p-4 flex items-center gap-3">
           <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-500" />

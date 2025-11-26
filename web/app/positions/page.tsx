@@ -1,16 +1,64 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { supabase, TradingPosition } from '@/lib/supabase'
 import { formatCurrency, formatPercent, formatDate, cn, getPnlColor, getDirectionBgColor, getStatusColor } from '@/lib/utils'
-import { ArrowUpRight, ArrowDownRight, X, Filter, Download } from 'lucide-react'
+import { ArrowUpRight, ArrowDownRight, X, Filter, Download, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react'
+
+const SYNC_INTERVAL = 30000 // 30 seconds
 
 export default function PositionsPage() {
   const [positions, setPositions] = useState<TradingPosition[]>([])
   const [filter, setFilter] = useState<'all' | 'open' | 'closed'>('all')
   const [symbolFilter, setSymbolFilter] = useState<string>('all')
   const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState(false)
+  const [lastSync, setLastSync] = useState<Date | null>(null)
+  const [syncError, setSyncError] = useState<string | null>(null)
 
+  // Sync positions from Alpaca
+  const syncPositions = useCallback(async (showLoading = true) => {
+    if (showLoading) setSyncing(true)
+    setSyncError(null)
+
+    try {
+      const res = await fetch('/api/positions/sync', { method: 'POST' })
+      const data = await res.json()
+
+      if (data.success) {
+        setLastSync(new Date())
+        console.log('Positions synced:', data.results)
+      } else {
+        setSyncError(data.error || 'Sync failed')
+      }
+    } catch (error) {
+      console.error('Error syncing positions:', error)
+      setSyncError('Network error')
+    } finally {
+      setSyncing(false)
+    }
+  }, [])
+
+  // Initial sync and fetch
+  useEffect(() => {
+    const init = async () => {
+      await syncPositions(true)
+      await fetchPositions()
+    }
+    init()
+  }, [])
+
+  // Auto-sync every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      await syncPositions(false)
+      await fetchPositions()
+    }, SYNC_INTERVAL)
+
+    return () => clearInterval(interval)
+  }, [syncPositions])
+
+  // Fetch when filters change
   useEffect(() => {
     fetchPositions()
   }, [filter, symbolFilter])
@@ -99,15 +147,39 @@ export default function PositionsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Positions</h1>
-          <p className="text-gray-400">Manage your trading positions</p>
+          <p className="text-gray-400 flex items-center gap-2">
+            Manage your trading positions
+            {lastSync && (
+              <span className="text-xs flex items-center gap-1">
+                {syncError ? (
+                  <AlertCircle className="w-3 h-3 text-red-400" />
+                ) : (
+                  <CheckCircle className="w-3 h-3 text-green-400" />
+                )}
+                <span className={syncError ? 'text-red-400' : 'text-green-400'}>
+                  Synced {Math.round((Date.now() - lastSync.getTime()) / 1000)}s ago
+                </span>
+              </span>
+            )}
+          </p>
         </div>
-        <button
-          onClick={exportToCsv}
-          className="btn btn-secondary flex items-center gap-2"
-        >
-          <Download className="w-4 h-4" />
-          Export CSV
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => syncPositions(true)}
+            disabled={syncing}
+            className="btn btn-secondary flex items-center gap-2"
+          >
+            <RefreshCw className={cn("w-4 h-4", syncing && "animate-spin")} />
+            {syncing ? 'Syncing...' : 'Sync'}
+          </button>
+          <button
+            onClick={exportToCsv}
+            className="btn btn-secondary flex items-center gap-2"
+          >
+            <Download className="w-4 h-4" />
+            Export CSV
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
