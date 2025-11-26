@@ -69,8 +69,10 @@ class Settings(BaseSettings):
     # These can be overridden from Supabase
     TARGET_SYMBOLS: str = Field(default="BTC,ETH,SOL")
     TIMEFRAME: str = Field(default="15m")
-    MAX_LEVERAGE: int = Field(default=10)
-    DEFAULT_LEVERAGE: int = Field(default=3)
+    # NOTE: Alpaca crypto does NOT support leverage. These are kept for compatibility
+    # but are always forced to 1 in the DecisionValidator when using Alpaca.
+    MAX_LEVERAGE: int = Field(default=1)  # Always 1 for Alpaca crypto
+    DEFAULT_LEVERAGE: int = Field(default=1)  # Always 1 for Alpaca crypto
     MAX_POSITION_SIZE_PCT: float = Field(default=5.0)
     MAX_TOTAL_EXPOSURE_PCT: float = Field(default=30.0)
 

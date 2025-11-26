@@ -977,6 +977,47 @@ class SupabaseOperations:
 
         return results
 
+    # ============== CoinGecko Market Global ==============
+
+    def save_market_global(self, coingecko_data: Dict[str, Any]) -> Optional[str]:
+        """
+        Save CoinGecko global market data.
+
+        Args:
+            coingecko_data: CoinGecko market summary data
+
+        Returns:
+            ID of the saved record or None
+        """
+        try:
+            global_data = coingecko_data.get("global", {})
+            trending = coingecko_data.get("trending", [])
+            trending_symbols = coingecko_data.get("trending_symbols", [])
+            tracked_trending = coingecko_data.get("tracked_trending", [])
+
+            data = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "btc_dominance": global_data.get("btc_dominance"),
+                "eth_dominance": global_data.get("eth_dominance"),
+                "total_market_cap_usd": global_data.get("total_market_cap_usd"),
+                "total_volume_24h_usd": global_data.get("total_volume_24h_usd"),
+                "market_cap_change_24h_pct": global_data.get("market_cap_change_24h_pct"),
+                "active_cryptocurrencies": global_data.get("active_cryptocurrencies"),
+                "trending_coins": trending,
+                "trending_symbols": trending_symbols,
+                "tracked_trending": tracked_trending
+            }
+
+            result = self.client.table("trading_market_global").insert(data).execute()
+
+            if result.data:
+                return result.data[0]["id"]
+            return None
+
+        except Exception as e:
+            logger.warning(f"Failed to save market global data: {e}")
+            return None
+
 
 # Global operations instance
 db_ops = SupabaseOperations()

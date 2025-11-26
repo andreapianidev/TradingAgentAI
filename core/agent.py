@@ -18,6 +18,7 @@ from data.market_data import market_data_collector
 from data.sentiment import get_market_sentiment
 from data.news_feed import get_recent_news
 from data.whale_alert import get_whale_alerts, analyze_whale_flow
+from data.coingecko import get_market_summary as get_coingecko_data
 from data.cache_manager import cache_manager
 
 from core.llm_client import llm_client
@@ -117,11 +118,26 @@ class TradingAgent:
         logger.info(f"{mode_label}Portfolio: ${portfolio.get('total_equity', 0):.2f} | "
                    f"Exposure: {current_exposure:.1f}%")
 
-        # Get global sentiment, news, and whale alerts (shared across symbols)
+        # Get global sentiment, news, whale alerts, and CoinGecko data (shared across symbols)
         sentiment = self._get_sentiment_safe()
         news = self._get_news_safe()
         whale_alerts = self._get_whale_alerts_safe()
         whale_flow = self._analyze_whale_flow_safe()
+        coingecko = self._get_coingecko_safe()
+
+        # Log CoinGecko global market data
+        logger.info("-" * 50)
+        logger.info("COINGECKO MARKET DATA:")
+        if coingecko.get("global"):
+            global_data = coingecko["global"]
+            logger.info(f"  BTC Dominance: {global_data.get('btc_dominance', 0):.1f}%")
+            logger.info(f"  Total Market Cap: ${global_data.get('total_market_cap_usd', 0)/1e12:.2f}T")
+            logger.info(f"  Market Cap Change 24h: {global_data.get('market_cap_change_24h_pct', 0):+.2f}%")
+        if coingecko.get("trending"):
+            trending_symbols = [t["symbol"] for t in coingecko["trending"][:5]]
+            logger.info(f"  Trending: {', '.join(trending_symbols)}")
+        if coingecko.get("tracked_trending"):
+            logger.info(f"  Our coins trending: {', '.join(coingecko['tracked_trending'])}")
 
         # Log sentiment data
         logger.info("-" * 50)
@@ -161,7 +177,8 @@ class TradingAgent:
                     sentiment=sentiment,
                     news=news,
                     whale_alerts=whale_alerts,
-                    whale_flow=whale_flow
+                    whale_flow=whale_flow,
+                    coingecko=coingecko
                 )
                 results["symbols"][symbol] = result
 
@@ -231,7 +248,8 @@ class TradingAgent:
         sentiment: Dict[str, Any],
         news: List[Dict[str, Any]],
         whale_alerts: List[Dict[str, Any]],
-        whale_flow: Dict[str, Any]
+        whale_flow: Dict[str, Any],
+        coingecko: Dict[str, Any] = None
     ) -> Dict[str, Any]:
         """
         Process a single symbol through the trading pipeline.
@@ -245,6 +263,7 @@ class TradingAgent:
             news: Recent news
             whale_alerts: Recent whale transactions
             whale_flow: Whale capital flow analysis
+            coingecko: CoinGecko market data (global, trending, coins)
 
         Returns:
             Processing result dictionary
@@ -349,7 +368,8 @@ class TradingAgent:
             sentiment=sentiment,
             news=news,
             open_positions=open_positions,
-            whale_flow=whale_flow
+            whale_flow=whale_flow,
+            coingecko=coingecko
         )
 
         action = decision.get("action", ACTION_HOLD)
@@ -533,6 +553,30 @@ class TradingAgent:
                 "net_flow": 0,
                 "interpretation": "Whale data unavailable",
                 "alert_count": 0
+            }
+
+    def _get_coingecko_safe(self) -> Dict[str, Any]:
+        """Get CoinGecko market data with error handling and save to database."""
+        try:
+            data = get_coingecko_data(self.symbols)
+
+            # Save to database for dashboard display
+            if data.get("global"):
+                try:
+                    db_ops.save_market_global(data)
+                except Exception as e:
+                    logger.debug(f"Error saving CoinGecko data to database: {e}")
+
+            return data
+        except Exception as e:
+            logger.warning(f"Failed to get CoinGecko data: {e}")
+            return {
+                "global": {},
+                "trending": [],
+                "trending_symbols": [],
+                "tracked_trending": [],
+                "coins": {},
+                "error": str(e)
             }
 
     def _generate_daily_analysis(

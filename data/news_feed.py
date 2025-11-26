@@ -48,10 +48,16 @@ class NewsFeedCollector:
         self._cache: List[Dict[str, Any]] = []
         self._cache_time: Optional[datetime] = None
         self._seen_hashes: Set[str] = set()  # Track seen news hashes for dedup
-        # Default feeds if not configured
+        # Default feeds if not configured - multiple sources for better coverage
         self.default_feeds = [
+            # Original feeds
             "https://cointelegraph.com/rss",
             "https://bitcoinmagazine.com/.rss/full/",
+            # Additional feeds for more coverage
+            "https://www.coindesk.com/arc/outboundfeeds/rss/",
+            "https://decrypt.co/feed",
+            "https://bitcoinist.com/feed/",
+            "https://www.newsbtc.com/feed/",
         ]
 
     def get_recent_news(self, limit: int = 10) -> List[Dict[str, Any]]:
