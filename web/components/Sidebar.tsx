@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
@@ -9,12 +10,15 @@ import {
   BarChart3,
   Settings,
   Bot,
-  Wallet
+  Wallet,
+  Terminal
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { supabase } from '@/lib/supabase'
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+  { name: 'Bot Console', href: '/bot', icon: Terminal },
   { name: 'Positions', href: '/positions', icon: TrendingUp },
   { name: 'Trade History', href: '/history', icon: History },
   { name: 'Market Analysis', href: '/market', icon: BarChart3 },
@@ -23,6 +27,30 @@ const navigation = [
 
 export default function Sidebar() {
   const pathname = usePathname()
+  const [equity, setEquity] = useState<number | null>(null)
+  const [pnlPct, setPnlPct] = useState<number>(0)
+  const [tradingMode, setTradingMode] = useState<string>('paper')
+
+  useEffect(() => {
+    const fetchPortfolio = async () => {
+      const { data } = await supabase
+        .from('trading_portfolio_snapshots')
+        .select('total_equity_usdc, total_pnl_pct, trading_mode')
+        .order('timestamp', { ascending: false })
+        .limit(1)
+        .single()
+
+      if (data) {
+        setEquity(parseFloat(data.total_equity_usdc))
+        setPnlPct(parseFloat(data.total_pnl_pct) || 0)
+        setTradingMode(data.trading_mode || 'paper')
+      }
+    }
+
+    fetchPortfolio()
+    const interval = setInterval(fetchPortfolio, 30000)
+    return () => clearInterval(interval)
+  }, [])
 
   return (
     <div className="w-64 bg-gray-900/80 backdrop-blur-sm border-r border-gray-800 flex flex-col">
@@ -66,10 +94,22 @@ export default function Sidebar() {
         <div className="bg-gray-800/50 rounded-lg p-4">
           <div className="flex items-center gap-3 mb-3">
             <Wallet className="w-5 h-5 text-gray-400" />
-            <span className="text-sm text-gray-400">Paper Trading</span>
+            <span className={cn(
+              "text-sm",
+              tradingMode === 'paper' ? "text-yellow-500" : "text-green-500"
+            )}>
+              {tradingMode === 'paper' ? 'Paper Trading' : 'Live Trading'}
+            </span>
           </div>
-          <div className="text-2xl font-bold text-white">$10,000.00</div>
-          <div className="text-sm text-green-500">+0.00%</div>
+          <div className="text-2xl font-bold text-white">
+            {equity !== null ? `$${equity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+          </div>
+          <div className={cn(
+            "text-sm",
+            pnlPct >= 0 ? "text-green-500" : "text-red-500"
+          )}>
+            {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%
+          </div>
         </div>
       </div>
     </div>

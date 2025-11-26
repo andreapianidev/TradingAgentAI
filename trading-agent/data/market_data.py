@@ -3,7 +3,7 @@ Market data collection from exchange.
 """
 from typing import Dict, Any, List
 
-from exchange.hyperliquid_client import exchange_client
+from exchange.exchange_factory import get_exchange_client
 from config.constants import OHLCV_LIMIT
 from config.settings import settings
 from utils.logger import get_logger
@@ -16,8 +16,9 @@ class MarketDataCollector:
 
     def __init__(self):
         """Initialize the collector."""
-        self.client = exchange_client
+        self.client = get_exchange_client()
         self.timeframe = settings.TIMEFRAME
+        logger.info(f"MarketDataCollector using {settings.EXCHANGE} exchange")
 
     def get_ticker(self, symbol: str) -> Dict[str, Any]:
         """

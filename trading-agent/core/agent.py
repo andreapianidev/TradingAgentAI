@@ -24,7 +24,6 @@ from core.llm_client import llm_client
 from core.decision_validator import decision_validator
 from core.risk_manager import risk_manager
 
-from database.connection import init_db, db_manager
 from database.operations import db_ops
 
 from utils.logger import get_logger, log_error_with_context
@@ -52,9 +51,8 @@ class TradingAgent:
         logger.info("=" * 50)
 
         try:
-            # Initialize database
-            logger.info("Connecting to database...")
-            init_db()
+            # Database connection is handled automatically by Supabase client
+            logger.info("Using Supabase database...")
 
             # Connect to exchange (uses appropriate client based on PAPER_TRADING setting)
             trading_mode = portfolio_manager.get_trading_mode()
@@ -389,10 +387,7 @@ class TradingAgent:
         except Exception as e:
             logger.error(f"Error closing LLM client: {e}")
 
-        try:
-            db_manager.disconnect()
-        except Exception as e:
-            logger.error(f"Error disconnecting database: {e}")
+        # Supabase client doesn't need explicit disconnect
 
         logger.info("Trading Agent shutdown complete")
 

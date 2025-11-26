@@ -74,9 +74,12 @@ class ExchangeClient(Protocol):
 SUPPORTED_EXCHANGES = ["hyperliquid", "alpaca"]
 
 
-def get_exchange_client() -> Union['HyperliquidClient', 'AlpacaClient']:
+def get_exchange_client(auto_connect: bool = True) -> Union['HyperliquidClient', 'AlpacaClient']:
     """
     Factory function to get the appropriate exchange client based on settings.
+
+    Args:
+        auto_connect: If True, automatically connect the client
 
     Returns:
         Exchange client instance (HyperliquidClient or AlpacaClient)
@@ -92,15 +95,23 @@ def get_exchange_client() -> Union['HyperliquidClient', 'AlpacaClient']:
             f"Supported exchanges: {', '.join(SUPPORTED_EXCHANGES)}"
         )
 
+    client = None
+
     if exchange_name == "hyperliquid":
         from exchange.hyperliquid_client import HyperliquidClient
         logger.info("Using Hyperliquid exchange")
-        return HyperliquidClient()
+        client = HyperliquidClient()
 
     elif exchange_name == "alpaca":
         from exchange.alpaca_client import AlpacaClient
         logger.info("Using Alpaca exchange")
-        return AlpacaClient()
+        client = AlpacaClient()
+
+    # Auto-connect if requested
+    if auto_connect and client is not None:
+        client.connect()
+
+    return client
 
 
 def create_exchange_client(exchange_name: str) -> Union['HyperliquidClient', 'AlpacaClient']:

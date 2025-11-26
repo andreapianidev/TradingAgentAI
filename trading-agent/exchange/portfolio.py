@@ -22,10 +22,11 @@ class PortfolioManager:
             self.is_paper_trading = True
             logger.info("PortfolioManager initialized in PAPER TRADING mode")
         else:
-            from exchange.hyperliquid_client import exchange_client
-            self.client = exchange_client
+            # Use exchange factory to get the appropriate client
+            from exchange.exchange_factory import get_exchange_client
+            self.client = get_exchange_client()
             self.is_paper_trading = False
-            logger.info("PortfolioManager initialized in LIVE TRADING mode")
+            logger.info(f"PortfolioManager initialized in LIVE TRADING mode (Exchange: {settings.EXCHANGE})")
 
         self._initial_equity = None
 

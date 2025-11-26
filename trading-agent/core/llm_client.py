@@ -13,7 +13,7 @@ from config.prompts import (
     build_user_prompt,
     get_decision_correction_prompt
 )
-from utils.logger import get_logger, log_trade_decision
+from utils.logger import get_logger, log_trade_decision, log_llm_request, log_llm_response
 
 logger = get_logger(__name__)
 
@@ -99,15 +99,22 @@ class DeepSeekClient:
                 whale_flow=whale_flow
             )
 
+            # Log the LLM request with prompts
+            log_llm_request(symbol, system_prompt, user_prompt)
+
             # Make API call
             response = self._call_api(system_prompt, user_prompt)
 
             if response is None:
                 logger.error("No response from DeepSeek API")
+                log_llm_response(symbol, None, None)
                 return self._default_hold_decision(symbol)
 
             # Parse response
             decision = self._parse_response(response)
+
+            # Log the LLM response
+            log_llm_response(symbol, response, decision)
 
             if decision is None:
                 # Try to correct invalid response

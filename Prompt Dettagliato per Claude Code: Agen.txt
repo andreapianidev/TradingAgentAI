@@ -7,7 +7,7 @@ Crea un agente di trading AI completo per operare autonomamente su Hyperliquid e
 Sviluppare un sistema di trading automatizzato che:
 - Si sveglia ogni 15 minuti
 - Raccoglie dati di mercato, indicatori tecnici e sentiment
-- Utilizza un LLM (Claude Opus 4 di Anthropic) per prendere decisioni
+- Utilizza un LLM (deepseek di cui hai la api nel env
 - Esegue operazioni di trading su BTC, ETH e SOL
 - Gestisce il rischio con stop loss e take profit
 - Logga tutte le operazioni in database PostgreSQL
@@ -361,7 +361,7 @@ CREATE TABLE market_contexts (
     symbol VARCHAR(10) NOT NULL,
     timestamp TIMESTAMP NOT NULL,
     price DECIMAL(20, 8) NOT NULL,
-    
+
     -- Indicatori
     macd DECIMAL(20, 8),
     macd_signal DECIMAL(20, 8),
@@ -369,7 +369,7 @@ CREATE TABLE market_contexts (
     rsi DECIMAL(10, 4),
     ema20 DECIMAL(20, 8),
     ema2 DECIMAL(20, 8),
-    
+
     -- Pivot Points
     pivot_pp DECIMAL(20, 8),
     pivot_r1 DECIMAL(20, 8),
@@ -377,29 +377,29 @@ CREATE TABLE market_contexts (
     pivot_s1 DECIMAL(20, 8),
     pivot_s2 DECIMAL(20, 8),
     pivot_distance_pct DECIMAL(10, 4),
-    
+
     -- Forecast
     forecast_trend VARCHAR(20),
     forecast_target_price DECIMAL(20, 8),
     forecast_change_pct DECIMAL(10, 4),
     forecast_confidence DECIMAL(5, 4),
-    
+
     -- Order Book
     orderbook_bid_volume DECIMAL(20, 8),
     orderbook_ask_volume DECIMAL(20, 8),
     orderbook_ratio DECIMAL(10, 4),
-    
+
     -- Sentiment
     sentiment_label VARCHAR(20),
     sentiment_score INTEGER,
-    
+
     -- Raw JSON completo
     raw_data JSONB,
-    
+
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_market_contexts_symbol_timestamp 
+CREATE INDEX idx_market_contexts_symbol_timestamp
 ON market_contexts(symbol, timestamp DESC);
 ```
 
@@ -410,7 +410,7 @@ CREATE TABLE trade_decisions (
     context_id INTEGER REFERENCES market_contexts(id),
     symbol VARCHAR(10) NOT NULL,
     timestamp TIMESTAMP NOT NULL,
-    
+
     -- Decisione LLM
     action VARCHAR(10) NOT NULL, -- open, close, hold
     direction VARCHAR(10), -- long, short, null
@@ -420,21 +420,21 @@ CREATE TABLE trade_decisions (
     take_profit_pct DECIMAL(10, 4),
     confidence DECIMAL(5, 4),
     reasoning TEXT,
-    
+
     -- Esecuzione
     execution_status VARCHAR(20), -- pending, executed, failed, skipped
     execution_details JSONB,
     execution_timestamp TIMESTAMP,
-    
+
     -- Entry details (se aperta)
     entry_price DECIMAL(20, 8),
     entry_quantity DECIMAL(20, 8),
     order_id VARCHAR(100),
-    
+
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_trade_decisions_symbol_timestamp 
+CREATE INDEX idx_trade_decisions_symbol_timestamp
 ON trade_decisions(symbol, timestamp DESC);
 ```
 
@@ -444,36 +444,36 @@ CREATE TABLE positions (
     id SERIAL PRIMARY KEY,
     symbol VARCHAR(10) NOT NULL,
     direction VARCHAR(10) NOT NULL,
-    
+
     -- Entry
     entry_timestamp TIMESTAMP NOT NULL,
     entry_price DECIMAL(20, 8) NOT NULL,
     quantity DECIMAL(20, 8) NOT NULL,
     leverage INTEGER NOT NULL,
     entry_trade_id INTEGER REFERENCES trade_decisions(id),
-    
+
     -- Exit
     exit_timestamp TIMESTAMP,
     exit_price DECIMAL(20, 8),
     exit_reason VARCHAR(50), -- take_profit, stop_loss, manual, signal_reversal
     exit_trade_id INTEGER REFERENCES trade_decisions(id),
-    
+
     -- P&L
     realized_pnl DECIMAL(20, 8),
     realized_pnl_pct DECIMAL(10, 4),
-    
+
     -- Status
     status VARCHAR(20) DEFAULT 'open', -- open, closed
-    
+
     -- Stop Loss & Take Profit
     stop_loss_price DECIMAL(20, 8),
     take_profit_price DECIMAL(20, 8),
-    
+
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_positions_symbol_status 
+CREATE INDEX idx_positions_symbol_status
 ON positions(symbol, status);
 ```
 
@@ -482,27 +482,27 @@ ON positions(symbol, status);
 CREATE TABLE portfolio_snapshots (
     id SERIAL PRIMARY KEY,
     timestamp TIMESTAMP NOT NULL,
-    
+
     -- Balances
     total_equity_usdc DECIMAL(20, 8) NOT NULL,
     available_balance_usdc DECIMAL(20, 8) NOT NULL,
     margin_used_usdc DECIMAL(20, 8),
-    
+
     -- Positions summary
     open_positions_count INTEGER,
     total_exposure_pct DECIMAL(10, 4),
-    
+
     -- Performance
     total_pnl_usdc DECIMAL(20, 8),
     total_pnl_pct DECIMAL(10, 4),
-    
+
     -- Raw data
     raw_portfolio JSONB,
-    
+
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_portfolio_snapshots_timestamp 
+CREATE INDEX idx_portfolio_snapshots_timestamp
 ON portfolio_snapshots(timestamp DESC);
 ```
 
@@ -522,7 +522,7 @@ CREATE TABLE news_events (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_news_events_published 
+CREATE INDEX idx_news_events_published
 ON news_events(published_at DESC);
 ```
 
@@ -736,7 +736,7 @@ exchange = ccxt.hyperliquid({
 
 **Mapping:**
 - 0-25: "FEAR"
-- 26-45: "NEUTRAL"  
+- 26-45: "NEUTRAL"
 - 46-100: "GREED"
 
 ### File: data/news_feed.py
