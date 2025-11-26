@@ -4,7 +4,7 @@ Portfolio management and tracking.
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
-from exchange.hyperliquid_client import exchange_client
+from config.settings import settings
 from database.operations import db_ops
 from utils.logger import get_logger, log_portfolio_status
 
@@ -15,8 +15,21 @@ class PortfolioManager:
     """Manages portfolio state and snapshots."""
 
     def __init__(self):
-        """Initialize the portfolio manager."""
-        self.client = exchange_client
+        """Initialize the portfolio manager with appropriate client based on mode."""
+        from exchange.exchange_factory import get_exchange_client
+
+        # ALWAYS use the exchange client (Alpaca) - it handles paper/live mode internally
+        # The old PAPER_TRADING flag was for an internal simulator - we don't use that anymore
+        # Alpaca has its own paper trading mode via ALPACA_PAPER_TRADING
+        self.client = get_exchange_client()
+
+        # Determine if we're in paper trading mode based on Alpaca settings
+        self.is_paper_trading = settings.ALPACA_PAPER_TRADING if settings.EXCHANGE == "alpaca" else settings.PAPER_TRADING
+
+        mode_str = "PAPER" if self.is_paper_trading else "LIVE"
+        logger.info(f"PortfolioManager initialized - Exchange: {settings.EXCHANGE.upper()}, Mode: {mode_str}")
+        logger.info(f"Using Alpaca API: {settings.ALPACA_BASE_URL}")
+
         self._initial_equity = None
 
     def get_portfolio_state(self) -> Dict[str, Any]:
@@ -195,6 +208,71 @@ class PortfolioManager:
             }
             for s in snapshots
         ]
+
+    # ================== PAPER TRADING SPECIFIC ==================
+
+    def get_paper_trading_summary(self) -> Optional[Dict[str, Any]]:
+        """
+        Get paper trading performance summary.
+        Only available in paper trading mode.
+
+        Returns:
+            Performance summary or None if not in paper trading mode
+        """
+        if not self.is_paper_trading:
+            return None
+
+        return self.client.get_performance_summary()
+
+    def get_paper_trade_history(self) -> Optional[List[Dict[str, Any]]]:
+        """
+        Get paper trading trade history.
+        Only available in paper trading mode.
+
+        Returns:
+            List of trades or None if not in paper trading mode
+        """
+        if not self.is_paper_trading:
+            return None
+
+        return self.client.get_trade_history()
+
+    def reset_paper_trading(self) -> bool:
+        """
+        Reset paper trading to initial state.
+        Only available in paper trading mode.
+
+        Returns:
+            True if reset successful, False if not in paper trading mode
+        """
+        if not self.is_paper_trading:
+            logger.warning("Cannot reset - not in paper trading mode")
+            return False
+
+        self.client.reset_paper_trading()
+        return True
+
+    def check_stop_loss_take_profit(self) -> List[Dict[str, Any]]:
+        """
+        Check and execute SL/TP orders in paper trading mode.
+        Should be called periodically during paper trading.
+
+        Returns:
+            List of closed positions
+        """
+        if not self.is_paper_trading:
+            return []
+
+        return self.client.check_stop_loss_take_profit()
+
+    def get_trading_mode(self) -> str:
+        """
+        Get current trading mode.
+
+        Returns:
+            'PAPER' or 'LIVE'
+        """
+        return "PAPER" if self.is_paper_trading else "LIVE"
 
 
 # Global portfolio manager instance

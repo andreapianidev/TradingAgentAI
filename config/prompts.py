@@ -72,6 +72,7 @@ PESI DI IMPORTANZA INDICATORI (usa questi per valutare):
 - MACD: 0.7 (importante per momentum)
 - RSI: 0.7 (importante per overbought/oversold)
 - Forecast Prophet: 0.6 (importante per trend)
+- Whale Flow: 0.6 (importante - outflow da exchange = accumulo bullish, inflow = distribuzione bearish)
 - Order Book: 0.5 (moderatamente importante)
 - Sentiment: 0.4 (contesto generale)
 - News: 0.3 (peso basso, mercato crypto meno reattivo alle news)
@@ -115,7 +116,8 @@ def build_user_prompt(
     orderbook: dict,
     sentiment: dict,
     news: list,
-    open_positions: list
+    open_positions: list,
+    whale_flow: dict = None
 ) -> str:
     """
     Build the user prompt with all market data.
@@ -131,6 +133,7 @@ def build_user_prompt(
         sentiment: Market sentiment
         news: Recent news items
         open_positions: Currently open positions
+        whale_flow: Whale capital flow analysis
 
     Returns:
         Formatted user prompt string
@@ -149,6 +152,16 @@ def build_user_prompt(
             f"  - [{n.get('sentiment', 'neutral')}] {n['title'][:100]}"
             for n in news[:5]
         ])
+
+    # Default whale_flow if None
+    if whale_flow is None:
+        whale_flow = {
+            "inflow_exchange": 0,
+            "outflow_exchange": 0,
+            "net_flow": 0,
+            "interpretation": "Dati non disponibili",
+            "alert_count": 0
+        }
 
     return f"""
 === ANALISI PER {symbol} ===
@@ -207,6 +220,13 @@ def build_user_prompt(
 
 📰 NEWS RECENTI:
 {news_str}
+
+🐋 WHALE ALERT (Movimenti Balene):
+- Inflow verso exchange: ${whale_flow.get('inflow_exchange', 0):,.0f} (potenziale pressione di vendita)
+- Outflow da exchange: ${whale_flow.get('outflow_exchange', 0):,.0f} (potenziale accumulo)
+- Net Flow: ${whale_flow.get('net_flow', 0):,.0f} (positivo = bullish, negativo = bearish)
+- Interpretazione: {whale_flow.get('interpretation', 'Dati non disponibili')}
+- Transazioni monitorate: {whale_flow.get('alert_count', 0)}
 
 Analizza tutti i dati sopra e fornisci la tua decisione di trading in formato JSON."""
 

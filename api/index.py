@@ -77,12 +77,10 @@ class handler(BaseHTTPRequestHandler):
         try:
             from exchange.portfolio import portfolio_manager
             from database.operations import db_ops
-            from database.connection import init_db
-            from exchange.hyperliquid_client import exchange_client
+            from exchange.exchange_factory import get_exchange_client
 
-            # Initialize connections
-            init_db()
-            exchange_client.connect()
+            # Initialize connections - exchange_factory handles this
+            exchange_client = get_exchange_client(auto_connect=True)
 
             # Get portfolio
             portfolio = portfolio_manager.get_portfolio_state()

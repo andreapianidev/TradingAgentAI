@@ -38,6 +38,7 @@ class ProphetForecaster:
         self.model = None
         self._cycle_count = 0
         self._last_train_time = None
+        self._has_regressors = False
         self._model_dir = Path("models")
         self._model_dir.mkdir(exist_ok=True)
 
@@ -93,6 +94,206 @@ class ProphetForecaster:
         except Exception as e:
             logger.error(f"Error training Prophet model: {e}")
             return False
+
+    def train_with_regressors(
+        self,
+        df: pd.DataFrame,
+        volume: Optional[pd.Series] = None,
+        volatility: Optional[pd.Series] = None,
+        sentiment: Optional[pd.Series] = None
+    ) -> bool:
+        """
+        Train Prophet model with external regressors.
+
+        Args:
+            df: DataFrame with 'ds' (datetime) and 'y' (price) columns
+            volume: Normalized trading volume (optional)
+            volatility: ATR or rolling std deviation (optional)
+            sentiment: Fear & Greed score 0-100 (optional)
+
+        Returns:
+            True if training successful
+        """
+        try:
+            from prophet import Prophet
+
+            if df.empty or len(df) < 30:
+                logger.warning(f"Insufficient data for Prophet training: {len(df)} rows")
+                return False
+
+            # Initialize Prophet with optimized parameters
+            self.model = Prophet(
+                changepoint_prior_scale=0.05,
+                seasonality_prior_scale=0.1,
+                seasonality_mode='multiplicative',
+                daily_seasonality=True,
+                weekly_seasonality=True,
+                yearly_seasonality=False,
+                interval_width=0.95,
+            )
+
+            # Add custom intraday seasonality
+            self.model.add_seasonality(
+                name='intraday',
+                period=0.25,
+                fourier_order=3
+            )
+
+            # Add regressors if provided
+            train_df = df.copy()
+
+            if volume is not None and len(volume) == len(df):
+                # Normalize volume to 0-1 range
+                vol_min, vol_max = volume.min(), volume.max()
+                if vol_max > vol_min:
+                    norm_volume = (volume - vol_min) / (vol_max - vol_min)
+                else:
+                    norm_volume = volume * 0
+                train_df['volume'] = norm_volume.values
+                self.model.add_regressor('volume', prior_scale=0.5, mode='multiplicative')
+                logger.debug("Added volume regressor")
+
+            if volatility is not None and len(volatility) == len(df):
+                # Normalize volatility to 0-1 range
+                vol_min, vol_max = volatility.min(), volatility.max()
+                if vol_max > vol_min:
+                    norm_volatility = (volatility - vol_min) / (vol_max - vol_min)
+                else:
+                    norm_volatility = volatility * 0
+                train_df['volatility'] = norm_volatility.values
+                self.model.add_regressor('volatility', prior_scale=0.3, mode='multiplicative')
+                logger.debug("Added volatility regressor")
+
+            if sentiment is not None and len(sentiment) == len(df):
+                # Normalize sentiment (already 0-100, convert to 0-1)
+                train_df['sentiment'] = (sentiment / 100).values
+                self.model.add_regressor('sentiment', prior_scale=0.2, mode='additive')
+                logger.debug("Added sentiment regressor")
+
+            # Fit the model
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                self.model.fit(train_df)
+
+            self._last_train_time = datetime.utcnow()
+            self._cycle_count = 0
+            self._has_regressors = any([
+                volume is not None,
+                volatility is not None,
+                sentiment is not None
+            ])
+
+            logger.info(f"Prophet model with regressors trained for {self.symbol}")
+            return True
+
+        except ImportError:
+            logger.error("Prophet not installed")
+            return False
+        except Exception as e:
+            logger.error(f"Error training Prophet with regressors: {e}")
+            return False
+
+    def forecast_multi_horizon(
+        self,
+        current_price: Optional[float] = None
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Generate forecasts for multiple time horizons.
+
+        Returns forecasts for 1h, 4h, and 24h ahead.
+
+        Args:
+            current_price: Current price for reference (optional)
+
+        Returns:
+            Dictionary with forecasts for each horizon:
+            {
+                "1h": ForecastResult,
+                "4h": ForecastResult,
+                "24h": ForecastResult
+            }
+        """
+        horizons = {
+            "1h": 4,    # 4 periods of 15min = 1 hour
+            "4h": 16,   # 16 periods = 4 hours
+            "24h": 96   # 96 periods = 24 hours
+        }
+
+        results = {}
+
+        if self.model is None:
+            logger.warning("Prophet model not trained")
+            for horizon in horizons:
+                results[horizon] = self._empty_forecast()
+            return results
+
+        try:
+            # Get maximum periods needed
+            max_periods = max(horizons.values())
+
+            # Create future dataframe
+            future = self.model.make_future_dataframe(
+                periods=max_periods,
+                freq='15min'
+            )
+
+            # Generate forecast
+            forecast = self.model.predict(future)
+
+            # Get current price (last actual value)
+            last_actual_idx = len(forecast) - max_periods - 1
+            if last_actual_idx >= 0:
+                base_price = float(forecast['yhat'].iloc[last_actual_idx])
+            elif current_price:
+                base_price = current_price
+            else:
+                base_price = float(forecast['yhat'].iloc[0])
+
+            # Extract forecasts for each horizon
+            for horizon_name, periods in horizons.items():
+                forecast_idx = len(forecast) - max_periods + periods - 1
+                horizon_forecast = forecast.iloc[forecast_idx]
+
+                target_price = float(horizon_forecast['yhat'])
+                lower_bound = float(horizon_forecast['yhat_lower'])
+                upper_bound = float(horizon_forecast['yhat_upper'])
+
+                # Calculate change percentage
+                change_pct = ((target_price - base_price) / base_price) * 100
+
+                # Determine trend
+                if change_pct >= FORECAST_BULLISH_THRESHOLD:
+                    trend = "RIALZISTA"
+                elif change_pct <= FORECAST_BEARISH_THRESHOLD:
+                    trend = "RIBASSISTA"
+                else:
+                    trend = "LATERALE"
+
+                # Calculate confidence
+                interval_width = upper_bound - lower_bound
+                relative_width = interval_width / target_price if target_price > 0 else 1
+                confidence = max(0.5, min(1.0, 1 - (relative_width / 2)))
+
+                results[horizon_name] = {
+                    "trend": trend,
+                    "target_price": target_price,
+                    "change_pct": change_pct,
+                    "confidence": confidence,
+                    "lower_bound": lower_bound,
+                    "upper_bound": upper_bound,
+                    "periods_ahead": periods,
+                    "current_price": base_price,
+                    "horizon": horizon_name
+                }
+
+            self._cycle_count += 1
+            return results
+
+        except Exception as e:
+            logger.error(f"Error generating multi-horizon forecast: {e}")
+            for horizon in horizons:
+                results[horizon] = self._empty_forecast()
+            return results
 
     def forecast(
         self,

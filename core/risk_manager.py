@@ -290,6 +290,165 @@ class RiskManager:
 
         return True, "All validations passed"
 
+    def calculate_atr_stop_loss(
+        self,
+        entry_price: float,
+        direction: str,
+        atr: float,
+        atr_multiplier: float = 2.0,
+        min_sl_pct: float = 1.0,
+        max_sl_pct: float = 5.0
+    ) -> float:
+        """
+        Calculate dynamic stop loss based on ATR.
+
+        Uses ATR to set stop loss that adapts to market volatility.
+
+        Args:
+            entry_price: Entry price of the position
+            direction: Position direction (long/short)
+            atr: Average True Range value
+            atr_multiplier: Multiplier for ATR (default 2.0)
+            min_sl_pct: Minimum stop loss percentage (default 1%)
+            max_sl_pct: Maximum stop loss percentage (default 5%)
+
+        Returns:
+            Stop loss price
+        """
+        if atr <= 0 or entry_price <= 0:
+            # Fallback to default stop loss
+            return self.calculate_stop_loss_price(entry_price, direction)
+
+        # Calculate stop loss distance
+        sl_distance = atr * atr_multiplier
+
+        # Convert to percentage
+        sl_pct = (sl_distance / entry_price) * 100
+
+        # Clamp to min/max
+        sl_pct = max(min_sl_pct, min(max_sl_pct, sl_pct))
+
+        # Calculate stop loss price
+        if direction == "long":
+            sl_price = entry_price * (1 - sl_pct / 100)
+        else:  # short
+            sl_price = entry_price * (1 + sl_pct / 100)
+
+        logger.debug(
+            f"ATR SL: ATR={atr:.2f}, multiplier={atr_multiplier}, "
+            f"sl_pct={sl_pct:.2f}%, sl_price={sl_price:.2f}"
+        )
+
+        return sl_price
+
+    def calculate_volatility_adjusted_size(
+        self,
+        available_balance: float,
+        confidence: float,
+        current_atr: float,
+        average_atr: float,
+        max_size_pct: float = None
+    ) -> float:
+        """
+        Calculate position size adjusted for current volatility.
+
+        Higher volatility = smaller position
+        Lower volatility = larger position
+
+        Args:
+            available_balance: Available balance for trading
+            confidence: Decision confidence (0-1)
+            current_atr: Current ATR value
+            average_atr: Average ATR over longer period
+            max_size_pct: Maximum position size percentage
+
+        Returns:
+            Volatility-adjusted position size percentage
+        """
+        max_pct = max_size_pct or self.max_position_size_pct
+
+        # Calculate base size from confidence
+        base_size = self.calculate_position_size(available_balance, confidence, max_pct)
+
+        if average_atr <= 0 or current_atr <= 0:
+            return base_size
+
+        # Calculate volatility ratio
+        volatility_ratio = current_atr / average_atr
+
+        # Inverse adjustment: high volatility = smaller position
+        # Clamp ratio between 0.5 and 2.0 to avoid extreme adjustments
+        clamped_ratio = max(0.5, min(2.0, volatility_ratio))
+        adjustment_factor = 1 / clamped_ratio
+
+        # Apply adjustment
+        adjusted_size = base_size * adjustment_factor
+
+        # Ensure within limits
+        adjusted_size = max(1.0, min(max_pct, adjusted_size))
+
+        logger.debug(
+            f"Volatility adjusted size: base={base_size:.1f}%, "
+            f"vol_ratio={volatility_ratio:.2f}, adjusted={adjusted_size:.1f}%"
+        )
+
+        return round(adjusted_size, 1)
+
+    def calculate_volatility_adjusted_leverage(
+        self,
+        confidence: float,
+        current_atr: float,
+        average_atr: float,
+        max_leverage: int = None
+    ) -> int:
+        """
+        Calculate leverage adjusted for current volatility.
+
+        Higher volatility = lower leverage
+        Lower volatility = higher leverage (up to max)
+
+        Args:
+            confidence: Decision confidence (0-1)
+            current_atr: Current ATR value
+            average_atr: Average ATR over longer period
+            max_leverage: Maximum allowed leverage
+
+        Returns:
+            Volatility-adjusted leverage
+        """
+        max_lev = max_leverage or self.max_leverage
+
+        # Calculate base leverage from confidence
+        base_leverage = self.calculate_leverage(confidence, max_lev)
+
+        if average_atr <= 0 or current_atr <= 0:
+            return base_leverage
+
+        # Calculate volatility ratio
+        volatility_ratio = current_atr / average_atr
+
+        # High volatility reduces leverage
+        if volatility_ratio > 1.5:
+            # High volatility: reduce leverage by 30-50%
+            reduction = min(0.5, (volatility_ratio - 1) * 0.3)
+            adjusted_leverage = int(base_leverage * (1 - reduction))
+        elif volatility_ratio < 0.7:
+            # Low volatility: can increase slightly
+            increase = min(0.2, (1 - volatility_ratio) * 0.3)
+            adjusted_leverage = int(base_leverage * (1 + increase))
+        else:
+            adjusted_leverage = base_leverage
+
+        # Ensure within limits
+        adjusted_leverage = max(1, min(max_lev, adjusted_leverage))
+
+        logger.debug(
+            f"Volatility adjusted leverage: base={base_leverage}, "
+            f"vol_ratio={volatility_ratio:.2f}, adjusted={adjusted_leverage}"
+        )
+
+        return adjusted_leverage
+
     def should_close_position(
         self,
         current_price: float,

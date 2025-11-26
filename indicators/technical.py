@@ -88,21 +88,21 @@ class TechnicalIndicators:
             return self._empty_indicators()
 
     def _empty_indicators(self) -> Dict[str, Any]:
-        """Return empty indicator values."""
+        """Return empty indicator values - None indicates data not available."""
         return {
-            "macd": 0,
-            "macd_signal": 0,
-            "macd_histogram": 0,
-            "rsi": 50,
-            "ema2": 0,
-            "ema20": 0,
-            "volume_sma": 0,
-            "price": 0,
-            "macd_bullish": False,
-            "macd_histogram_rising": False,
-            "rsi_overbought": False,
-            "rsi_oversold": False,
-            "price_above_ema20": False,
+            "macd": None,
+            "macd_signal": None,
+            "macd_histogram": None,
+            "rsi": None,  # None instead of fake 50 value
+            "ema2": None,
+            "ema20": None,
+            "volume_sma": None,
+            "price": None,
+            "macd_bullish": None,
+            "macd_histogram_rising": None,
+            "rsi_overbought": None,
+            "rsi_oversold": None,
+            "price_above_ema20": None,
         }
 
     def calculate_macd(
@@ -110,7 +110,7 @@ class TechnicalIndicators:
         fast: int = MACD_FAST_PERIOD,
         slow: int = MACD_SLOW_PERIOD,
         signal: int = MACD_SIGNAL_PERIOD
-    ) -> Dict[str, float]:
+    ) -> Dict[str, Any]:
         """
         Calculate MACD (Moving Average Convergence Divergence).
 
@@ -120,10 +120,10 @@ class TechnicalIndicators:
             signal: Signal line period (default 9)
 
         Returns:
-            Dictionary with macd, signal, histogram values
+            Dictionary with macd, signal, histogram values (None if insufficient data)
         """
         if len(self.df) < slow:
-            return {"macd": 0, "signal": 0, "histogram": 0}
+            return {"macd": None, "signal": None, "histogram": None}
 
         close = self.df["close"]
 
@@ -161,7 +161,7 @@ class TechnicalIndicators:
         # Check last 3 values for rising trend
         return histogram.iloc[-1] > histogram.iloc[-2] > histogram.iloc[-3]
 
-    def calculate_rsi(self, period: int = RSI_PERIOD) -> float:
+    def calculate_rsi(self, period: int = RSI_PERIOD) -> Optional[float]:
         """
         Calculate RSI (Relative Strength Index).
 
@@ -169,10 +169,10 @@ class TechnicalIndicators:
             period: RSI period (default 14)
 
         Returns:
-            RSI value (0-100)
+            RSI value (0-100) or None if insufficient data
         """
         if len(self.df) < period + 1:
-            return 50.0  # Neutral default
+            return None  # Return None instead of fake neutral value
 
         close = self.df["close"]
 
@@ -193,7 +193,7 @@ class TechnicalIndicators:
         # Calculate RSI
         rsi = 100 - (100 / (1 + rs))
 
-        return float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50.0
+        return float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else None
 
     def calculate_ema(self, period: int) -> float:
         """

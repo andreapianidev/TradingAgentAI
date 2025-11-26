@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config.settings import settings
 from database.connection import init_db, db_manager
 from database.operations import db_ops
-from exchange.hyperliquid_client import exchange_client
+from exchange.exchange_factory import get_exchange_client
 from exchange.portfolio import portfolio_manager
 
 # Page config
@@ -46,7 +46,8 @@ def init_connections():
     if "initialized" not in st.session_state:
         try:
             init_db()
-            exchange_client.connect()
+            exchange_client = get_exchange_client(auto_connect=True)
+            st.session_state.exchange_client = exchange_client
             st.session_state.initialized = True
         except Exception as e:
             st.error(f"Initialization error: {e}")

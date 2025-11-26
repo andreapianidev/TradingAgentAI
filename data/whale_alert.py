@@ -77,29 +77,43 @@ class WhaleAlertCollector:
         Fetch whale alerts from reverse-engineered endpoint.
 
         The whale-alert.io website makes POST requests to get feed data.
+        Uses fallback sources if primary fails.
         """
         alerts = []
 
         try:
-            # Method 1: Try the public feed endpoint
+            # Method 1: Try the public feed endpoint (whale-alert.io)
             alerts = self._fetch_from_public_feed()
 
-            if not alerts:
-                # Method 2: Try scraping the main page data
+            if alerts:
+                logger.debug(f"Whale alerts: fetched {len(alerts)} from primary source (whale-alert.io)")
+            else:
+                # Method 2: Try fallback source (BlockchainCenter)
+                logger.info("Whale alerts: primary source unavailable, trying fallback (BlockchainCenter)")
                 alerts = self._fetch_from_page_data()
+
+                if alerts:
+                    logger.debug(f"Whale alerts: fetched {len(alerts)} from fallback source")
+                else:
+                    logger.warning("Whale alerts: both primary and fallback sources returned no data")
 
         except Exception as e:
             logger.warning(f"Error fetching whale alerts: {e}")
 
+        # Log summary when no data available at all
+        if not alerts and not self._cache:
+            logger.info("Whale alerts: no data available from any source, trading decisions will proceed without whale flow analysis")
+
         return alerts
 
     def _fetch_from_public_feed(self) -> List[Dict[str, Any]]:
-        """Try to fetch from public feed endpoint."""
+        """Try to fetch from public feed endpoint (whale-alert.io)."""
         alerts = []
+        WHALE_ALERT_TIMEOUT = 10.0
 
         try:
             # The website loads data via this endpoint
-            with httpx.Client(timeout=10.0) as client:
+            with httpx.Client(timeout=WHALE_ALERT_TIMEOUT) as client:
                 # Try the feed endpoint used by the website
                 response = client.post(
                     "https://whale-alert.io/feed",
@@ -117,19 +131,26 @@ class WhaleAlertCollector:
                         alerts = self._parse_alerts(data)
                     elif isinstance(data, dict) and "transactions" in data:
                         alerts = self._parse_alerts(data["transactions"])
+                else:
+                    logger.debug(f"Whale-alert.io returned status {response.status_code}")
 
+        except httpx.TimeoutException:
+            logger.debug(f"Whale-alert.io timeout (>{WHALE_ALERT_TIMEOUT}s)")
+        except httpx.ConnectError:
+            logger.debug("Whale-alert.io connection failed")
         except Exception as e:
-            logger.debug(f"Public feed method failed: {e}")
+            logger.debug(f"Whale-alert.io fetch failed: {e}")
 
         return alerts
 
     def _fetch_from_page_data(self) -> List[Dict[str, Any]]:
-        """Fallback: Fetch from alternative sources."""
+        """Fallback: Fetch from alternative sources (BlockchainCenter)."""
         alerts = []
+        FALLBACK_TIMEOUT = 10.0
 
         try:
             # Try BlockchainCenter whale tracking
-            with httpx.Client(timeout=10.0) as client:
+            with httpx.Client(timeout=FALLBACK_TIMEOUT) as client:
                 response = client.get(
                     "https://www.blockchaincenter.net/api/whale-watch/",
                     headers={
@@ -153,9 +174,15 @@ class WhaleAlertCollector:
                                 "hash": item.get("hash", "")[:16],
                             }
                             alerts.append(alert)
+                else:
+                    logger.debug(f"BlockchainCenter returned status {response.status_code}")
 
+        except httpx.TimeoutException:
+            logger.debug(f"BlockchainCenter timeout (>{FALLBACK_TIMEOUT}s)")
+        except httpx.ConnectError:
+            logger.debug("BlockchainCenter connection failed")
         except Exception as e:
-            logger.debug(f"Page data method failed: {e}")
+            logger.debug(f"BlockchainCenter fetch failed: {e}")
 
         return alerts
 
