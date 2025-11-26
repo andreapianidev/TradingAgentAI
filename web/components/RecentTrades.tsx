@@ -41,7 +41,7 @@ export default function RecentTrades({ decisions }: RecentTradesProps) {
     if (decision.action === 'close') {
       return `CLOSE ${decision.direction?.toUpperCase()}`
     }
-    return decision.action.toUpperCase()
+    return String(decision.action).toUpperCase()
   }
 
   return (
