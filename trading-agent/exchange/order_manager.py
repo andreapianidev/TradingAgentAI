@@ -23,7 +23,8 @@ class OrderManager:
     def __init__(self):
         """Initialize the order manager with appropriate client based on exchange settings."""
         # Use exchange_factory to get the correct client based on EXCHANGE setting
-        self.client = get_exchange_client(auto_connect=False)
+        # auto_connect=True ensures the client is connected and ready to execute trades
+        self.client = get_exchange_client(auto_connect=True)
         self.is_paper_trading = settings.PAPER_TRADING or settings.ALPACA_PAPER_TRADING
 
         exchange_name = settings.EXCHANGE.lower()
