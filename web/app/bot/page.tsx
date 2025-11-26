@@ -828,10 +828,19 @@ export default function BotConsolePage() {
             <span className="w-2 h-2 rounded-full bg-blue-400" /> {activities.filter(a => a.type === 'whale').length}
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <Clock className="w-3 h-3" />
-          <span>Auto-refresh 5s</span>
-        </div>
+        <button
+          onClick={() => setAutoScroll(!autoScroll)}
+          className={cn(
+            "flex items-center gap-2 px-2 py-1 rounded transition-colors",
+            autoScroll
+              ? "text-green-600 dark:text-green-500 hover:bg-green-50 dark:hover:bg-green-500/10"
+              : "text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+          )}
+          title={autoScroll ? "Click to pause auto-scroll" : "Click to resume auto-scroll"}
+        >
+          <Clock className={cn("w-3 h-3", !autoScroll && "opacity-50")} />
+          <span>{autoScroll ? "Auto-scroll ON" : "Auto-scroll OFF"}</span>
+        </button>
       </div>
     </div>
   )
