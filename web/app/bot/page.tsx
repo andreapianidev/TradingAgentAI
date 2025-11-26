@@ -59,6 +59,7 @@ export default function BotConsolePage() {
   }, [activities, autoScroll])
 
   const fetchActivityData = async () => {
+    setLoading(true)
     try {
       // Fetch recent decisions
       const { data: decisions } = await supabase
