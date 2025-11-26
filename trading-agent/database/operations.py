@@ -52,14 +52,16 @@ class DatabaseOperations:
         context_id: str,
         symbol: str,
         decision: Dict[str, Any],
-        execution_status: str = "pending"
+        execution_status: str = "pending",
+        raw_llm_decision: Dict[str, Any] = None
     ) -> str:
         """Save an LLM trading decision."""
         return supabase_ops.save_trade_decision(
             context_id=context_id,
             symbol=symbol,
             decision=decision,
-            execution_status=execution_status
+            execution_status=execution_status,
+            raw_llm_decision=raw_llm_decision
         )
 
     def update_trade_execution(

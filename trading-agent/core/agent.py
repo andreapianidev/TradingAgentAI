@@ -305,12 +305,13 @@ class TradingAgent:
 
         if not is_valid:
             logger.warning(f"Decision validation failed: {reason}")
-            # Save as skipped
+            # Save as skipped - pass raw LLM decision for analysis
             db_ops.save_trade_decision(
                 context_id=context_id,
                 symbol=symbol,
                 decision=sanitized_decision,
-                execution_status=EXECUTION_SKIPPED
+                execution_status=EXECUTION_SKIPPED,
+                raw_llm_decision=decision  # Store original LLM values
             )
             return {
                 "success": True,

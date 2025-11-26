@@ -112,7 +112,8 @@ class SupabaseOperations:
         context_id: str,
         symbol: str,
         decision: Dict[str, Any],
-        execution_status: str = "pending"
+        execution_status: str = "pending",
+        raw_llm_decision: Dict[str, Any] = None
     ) -> str:
         """
         Save an LLM trading decision.
@@ -120,6 +121,8 @@ class SupabaseOperations:
         Returns:
             The ID of the created trade decision
         """
+        # Store sanitized decision fields (may be null if converted to HOLD)
+        # and raw LLM decision in execution_details for analysis
         data = {
             "context_id": context_id,
             "symbol": symbol,
@@ -133,7 +136,9 @@ class SupabaseOperations:
             "confidence": decision.get("confidence"),
             "reasoning": decision.get("reasoning"),
             "execution_status": execution_status,
-            "trading_mode": "paper" if settings.PAPER_TRADING else "live"
+            "trading_mode": "paper" if settings.PAPER_TRADING else "live",
+            # Store raw LLM decision in execution_details for analysis
+            "execution_details": {"raw_llm_decision": raw_llm_decision} if raw_llm_decision else None
         }
 
         result = self.client.table("trading_decisions").insert(data).execute()
