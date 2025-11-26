@@ -116,12 +116,13 @@ class DecisionValidator:
         """Sanitize OPEN decision values."""
         sanitized = decision.copy()
 
-        # Clamp leverage
-        leverage = decision.get("leverage", 3)
-        sanitized["leverage"] = max(1, min(self.max_leverage, int(leverage)))
+        # Force leverage to 1 - Alpaca crypto does not support leverage
+        # LLM may suggest leverage > 1, but we ignore it completely
+        leverage = decision.get("leverage", 1)
+        sanitized["leverage"] = 1  # Always force to 1x for Alpaca crypto
 
-        if leverage != sanitized["leverage"]:
-            logger.info(f"Clamped leverage from {leverage} to {sanitized['leverage']}")
+        if leverage != 1:
+            logger.info(f"Forced leverage from {leverage}x to 1x (Alpaca crypto does not support leverage)")
 
         # Clamp position size
         size = decision.get("position_size_pct", 2.0)
@@ -198,12 +199,9 @@ class DecisionValidator:
                 2.0  # Max 2% when exposure is high
             )
 
-        # If exposure > 20%, reduce leverage
-        if current_exposure > 20:
-            adjusted["leverage"] = min(
-                adjusted.get("leverage", 3),
-                5  # Max 5x leverage when exposure is moderate
-            )
+        # Leverage is always 1x for Alpaca crypto (no leverage support)
+        # Keep this line for safety even though _sanitize_open already forces it
+        adjusted["leverage"] = 1
 
         return adjusted
 

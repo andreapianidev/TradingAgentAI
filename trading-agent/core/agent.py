@@ -165,10 +165,16 @@ class TradingAgent:
                 )
                 results["symbols"][symbol] = result
 
-                # Update exposure after trade
-                if result.get("executed"):
-                    portfolio = portfolio_manager.get_portfolio_state()
-                    current_exposure = portfolio.get("exposure_pct", 0)
+                # ALWAYS refresh portfolio state after processing each symbol
+                # This prevents stale exposure data when processing multiple symbols
+                # in fast-moving markets, reducing over-exposure risk
+                portfolio = portfolio_manager.get_portfolio_state()
+                open_positions = portfolio.get("positions", [])
+                new_exposure = portfolio.get("exposure_pct", 0)
+
+                if new_exposure != current_exposure:
+                    logger.debug(f"Exposure updated after {symbol}: {current_exposure:.1f}% -> {new_exposure:.1f}%")
+                    current_exposure = new_exposure
 
             except Exception as e:
                 log_error_with_context(e, f"process_symbol:{symbol}")

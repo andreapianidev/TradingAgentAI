@@ -2,7 +2,8 @@
 News feed parser for crypto news.
 """
 import re
-from typing import Dict, Any, List, Optional
+import hashlib
+from typing import Dict, Any, List, Optional, Set
 from datetime import datetime, timedelta
 from xml.etree import ElementTree
 
@@ -14,6 +15,9 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Timeout for individual feed requests (seconds)
+FEED_REQUEST_TIMEOUT = 10.0
+
 # Keywords to filter crypto-relevant news
 CRYPTO_KEYWORDS = [
     "bitcoin", "btc", "ethereum", "eth", "solana", "sol",
@@ -21,6 +25,18 @@ CRYPTO_KEYWORDS = [
     "altcoin", "trading", "exchange", "wallet",
     "bull", "bear", "rally", "crash", "pump", "dump"
 ]
+
+
+def _generate_news_hash(title: str, url: str = "") -> str:
+    """
+    Generate a unique hash for a news item based on title and URL.
+    Used for deduplication across multiple feeds.
+    """
+    # Normalize title (lowercase, remove extra spaces)
+    normalized_title = " ".join(title.lower().split())
+    # Create hash from title + url
+    content = f"{normalized_title}|{url or ''}"
+    return hashlib.md5(content.encode()).hexdigest()[:16]
 
 
 class NewsFeedCollector:
@@ -31,6 +47,7 @@ class NewsFeedCollector:
         self.feed_url = settings.NEWS_FEED_URL
         self._cache: List[Dict[str, Any]] = []
         self._cache_time: Optional[datetime] = None
+        self._seen_hashes: Set[str] = set()  # Track seen news hashes for dedup
         # Default feeds if not configured
         self.default_feeds = [
             "https://cointelegraph.com/rss",
@@ -75,11 +92,14 @@ class NewsFeedCollector:
         return age < CACHE_NEWS_DURATION
 
     def _fetch_news(self) -> List[Dict[str, Any]]:
-        """Fetch news from configured feeds."""
+        """Fetch news from configured feeds with deduplication."""
         all_news = []
+        self._seen_hashes.clear()  # Reset for fresh fetch
 
         # Use configured feed or defaults
         feeds = [self.feed_url] if self.feed_url else self.default_feeds
+        successful_feeds = 0
+        failed_feeds = 0
 
         for feed_url in feeds:
             if not feed_url:
@@ -87,9 +107,24 @@ class NewsFeedCollector:
 
             try:
                 news = self._parse_feed(feed_url)
-                all_news.extend(news)
+                # Deduplicate while adding
+                for item in news:
+                    news_hash = item.get("hash", "")
+                    if news_hash and news_hash not in self._seen_hashes:
+                        self._seen_hashes.add(news_hash)
+                        all_news.append(item)
+                    elif not news_hash:
+                        # No hash, add anyway but log
+                        all_news.append(item)
+                successful_feeds += 1
             except Exception as e:
+                failed_feeds += 1
                 logger.warning(f"Error fetching feed {feed_url}: {e}")
+
+        # Log dedup stats
+        if len(self._seen_hashes) > 0:
+            logger.debug(f"News fetch: {successful_feeds} feeds OK, {failed_feeds} failed, "
+                        f"{len(all_news)} unique articles (deduped from {len(self._seen_hashes)} hashes)")
 
         # Sort by date and filter
         all_news = self._filter_relevant_news(all_news)
@@ -98,11 +133,11 @@ class NewsFeedCollector:
         return all_news
 
     def _parse_feed(self, feed_url: str) -> List[Dict[str, Any]]:
-        """Parse an RSS/Atom feed."""
+        """Parse an RSS/Atom feed with timeout protection."""
         news_items = []
 
         try:
-            with httpx.Client(timeout=10.0) as client:
+            with httpx.Client(timeout=FEED_REQUEST_TIMEOUT) as client:
                 response = client.get(feed_url)
                 response.raise_for_status()
 
@@ -115,17 +150,21 @@ class NewsFeedCollector:
                     items = root.findall(".//{http://www.w3.org/2005/Atom}entry")
 
                 for item in items[:20]:  # Limit per feed
-                    news_item = self._parse_item(item)
+                    news_item = self._parse_item(item, feed_url)
                     if news_item:
                         news_items.append(news_item)
 
+        except httpx.TimeoutException:
+            logger.warning(f"Timeout fetching feed {feed_url} (>{FEED_REQUEST_TIMEOUT}s)")
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"HTTP error fetching feed {feed_url}: {e.response.status_code}")
         except Exception as e:
-            logger.error(f"Error parsing feed: {e}")
+            logger.error(f"Error parsing feed {feed_url}: {e}")
 
         return news_items
 
-    def _parse_item(self, item: ElementTree.Element) -> Optional[Dict[str, Any]]:
-        """Parse a single news item from XML."""
+    def _parse_item(self, item: ElementTree.Element, feed_url: str = "") -> Optional[Dict[str, Any]]:
+        """Parse a single news item from XML with hash for deduplication."""
         try:
             # Try RSS format first
             title = self._get_element_text(item, "title")
@@ -161,13 +200,27 @@ class NewsFeedCollector:
             # Analyze sentiment
             sentiment = self._analyze_sentiment(title, description)
 
+            # Generate unique hash for deduplication
+            news_hash = _generate_news_hash(title, link)
+
+            # Extract source name from feed URL
+            source = "RSS Feed"
+            if feed_url:
+                try:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(feed_url)
+                    source = parsed.netloc.replace("www.", "")
+                except Exception:
+                    pass
+
             return {
                 "title": title,
                 "summary": description,
                 "url": link,
                 "published_at": pub_date or datetime.utcnow().isoformat(),
                 "sentiment": sentiment,
-                "source": "RSS Feed",
+                "source": source,
+                "hash": news_hash,  # Add hash for deduplication
             }
 
         except Exception as e:

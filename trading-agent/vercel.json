@@ -2,28 +2,8 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/index.py",
-      "use": "@vercel/python"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/run",
-      "dest": "api/index.py"
-    },
-    {
-      "src": "/api/status",
-      "dest": "api/index.py"
-    },
-    {
-      "src": "/api/health",
-      "dest": "api/index.py"
-    }
-  ],
-  "crons": [
-    {
-      "path": "/api/run",
-      "schedule": "*/15 * * * *"
+      "src": "web/package.json",
+      "use": "@vercel/next"
     }
   ]
 }
