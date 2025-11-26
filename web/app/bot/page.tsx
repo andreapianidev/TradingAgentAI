@@ -238,11 +238,11 @@ export default function BotConsolePage() {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-800">
+      <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <Terminal className="w-6 h-6 text-green-500" />
-            <h1 className="text-xl font-bold">Activity Console</h1>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-white">Activity Console</h1>
           </div>
           <span className="text-sm text-gray-500">
             Real-time trading activity
@@ -251,7 +251,7 @@ export default function BotConsolePage() {
 
         <div className="flex items-center gap-2">
           {/* Filter */}
-          <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-1">
+          <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
             {(['all', 'decision', 'market', 'portfolio'] as FilterType[]).map(f => (
               <button
                 key={f}
@@ -259,8 +259,8 @@ export default function BotConsolePage() {
                 className={cn(
                   'px-3 py-1.5 rounded text-sm transition-colors',
                   filter === f
-                    ? 'bg-gray-700 text-white'
-                    : 'text-gray-400 hover:text-white'
+                    ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
                 )}
               >
                 {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
@@ -273,8 +273,8 @@ export default function BotConsolePage() {
             className={cn(
               'p-2 rounded-lg transition-colors',
               autoScroll
-                ? 'bg-green-500/10 text-green-500'
-                : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                ? 'bg-green-100 dark:bg-green-500/10 text-green-600 dark:text-green-500'
+                : 'text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800'
             )}
             title="Auto-scroll"
           >
@@ -283,7 +283,7 @@ export default function BotConsolePage() {
 
           <button
             onClick={fetchActivityData}
-            className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
+            className="p-2 text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
             title="Refresh"
           >
             <RefreshCw className={cn("w-5 h-5", loading && "animate-spin")} />
@@ -291,7 +291,7 @@ export default function BotConsolePage() {
 
           <button
             onClick={clearOldLogs}
-            className="p-2 text-gray-400 hover:text-red-500 hover:bg-gray-800 rounded-lg transition-colors"
+            className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-gray-800 rounded-lg transition-colors"
             title="Clear view"
           >
             <Trash2 className="w-5 h-5" />
@@ -301,33 +301,33 @@ export default function BotConsolePage() {
 
       {/* Status Bar */}
       {latestSnapshot && (
-        <div className="grid grid-cols-4 gap-4 p-4 bg-gray-900/50 border-b border-gray-800">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-800">
           <div className="flex items-center gap-3">
             <DollarSign className="w-5 h-5 text-green-500" />
             <div>
               <div className="text-xs text-gray-500">Equity</div>
-              <div className="font-bold">{formatCurrency(Number(latestSnapshot.total_equity_usdc) || 0)}</div>
+              <div className="font-bold text-gray-900 dark:text-white">{formatCurrency(Number(latestSnapshot.total_equity_usdc) || 0)}</div>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <Activity className="w-5 h-5 text-blue-500" />
             <div>
               <div className="text-xs text-gray-500">Available</div>
-              <div className="font-bold">{formatCurrency(Number(latestSnapshot.available_balance_usdc) || 0)}</div>
+              <div className="font-bold text-gray-900 dark:text-white">{formatCurrency(Number(latestSnapshot.available_balance_usdc) || 0)}</div>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <TrendingUp className="w-5 h-5 text-yellow-500" />
             <div>
               <div className="text-xs text-gray-500">Exposure</div>
-              <div className="font-bold">{(Number(latestSnapshot.exposure_pct) || 0).toFixed(1)}%</div>
+              <div className="font-bold text-gray-900 dark:text-white">{(Number(latestSnapshot.exposure_pct) || 0).toFixed(1)}%</div>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <Bot className="w-5 h-5 text-purple-500" />
             <div>
               <div className="text-xs text-gray-500">Open Positions</div>
-              <div className="font-bold">{latestSnapshot.open_positions_count || 0}</div>
+              <div className="font-bold text-gray-900 dark:text-white">{latestSnapshot.open_positions_count || 0}</div>
             </div>
           </div>
         </div>
@@ -336,7 +336,7 @@ export default function BotConsolePage() {
       {/* Activity Output */}
       <div
         ref={containerRef}
-        className="flex-1 overflow-y-auto bg-gray-950 font-mono text-sm"
+        className="flex-1 overflow-y-auto bg-white dark:bg-gray-950 font-mono text-sm"
       >
         {filteredActivities.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-500">
@@ -355,16 +355,16 @@ export default function BotConsolePage() {
                 <div key={log.id}>
                   {showDate && (
                     <div className="flex items-center gap-2 py-2 mt-2 first:mt-0">
-                      <div className="h-px flex-1 bg-gray-800" />
-                      <span className="text-xs text-gray-600 px-2">{formatDate(log.timestamp)}</span>
-                      <div className="h-px flex-1 bg-gray-800" />
+                      <div className="h-px flex-1 bg-gray-200 dark:bg-gray-800" />
+                      <span className="text-xs text-gray-500 dark:text-gray-600 px-2">{formatDate(log.timestamp)}</span>
+                      <div className="h-px flex-1 bg-gray-200 dark:bg-gray-800" />
                     </div>
                   )}
 
                   <div className="group">
                     <div
                       className={cn(
-                        'flex items-start gap-2 py-1.5 px-2 rounded hover:bg-gray-900/50',
+                        'flex items-start gap-2 py-1.5 px-2 rounded hover:bg-gray-100 dark:hover:bg-gray-900/50',
                         log.details && 'cursor-pointer'
                       )}
                       onClick={() => log.details && toggleLogExpand(log.id)}
@@ -402,7 +402,7 @@ export default function BotConsolePage() {
 
                       {/* Symbol */}
                       {log.symbol && (
-                        <span className="text-white font-semibold flex-shrink-0">
+                        <span className="text-gray-900 dark:text-white font-semibold flex-shrink-0">
                           {log.symbol}
                         </span>
                       )}
@@ -415,14 +415,14 @@ export default function BotConsolePage() {
 
                     {/* Expanded Details */}
                     {log.details && expandedLogs.has(log.id) && (
-                      <div className="ml-6 mt-1 mb-2 p-3 bg-gray-900 rounded-lg border border-gray-800">
+                      <div className="ml-6 mt-1 mb-2 p-3 bg-gray-100 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
                         {log.type === 'decision' && log.details.reasoning && (
                           <div className="mb-3">
                             <div className="text-xs text-gray-500 mb-1">LLM Reasoning:</div>
-                            <p className="text-sm text-gray-300">{log.details.reasoning}</p>
+                            <p className="text-sm text-gray-700 dark:text-gray-300">{log.details.reasoning}</p>
                           </div>
                         )}
-                        <pre className="text-xs text-gray-400 whitespace-pre-wrap overflow-x-auto">
+                        <pre className="text-xs text-gray-500 dark:text-gray-400 whitespace-pre-wrap overflow-x-auto">
                           {JSON.stringify(log.details, null, 2)}
                         </pre>
                       </div>
@@ -437,17 +437,17 @@ export default function BotConsolePage() {
       </div>
 
       {/* Footer with stats */}
-      <div className="flex items-center justify-between px-4 py-2 bg-gray-900/50 border-t border-gray-800 text-xs text-gray-500">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200 dark:border-gray-800 text-xs text-gray-500">
+        <div className="flex flex-wrap items-center gap-4">
           <span>{filteredActivities.length} activities</span>
-          <span className="text-gray-700">|</span>
-          <span className="flex items-center gap-1">
+          <span className="hidden sm:inline text-gray-300 dark:text-gray-700">|</span>
+          <span className="hidden sm:flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-purple-500" /> Decisions: {activities.filter(a => a.type === 'decision').length}
           </span>
-          <span className="flex items-center gap-1">
+          <span className="hidden sm:flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-cyan-500" /> Market: {activities.filter(a => a.type === 'market').length}
           </span>
-          <span className="flex items-center gap-1">
+          <span className="hidden sm:flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-yellow-500" /> Portfolio: {activities.filter(a => a.type === 'portfolio').length}
           </span>
         </div>

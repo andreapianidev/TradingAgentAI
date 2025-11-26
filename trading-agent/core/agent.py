@@ -123,6 +123,33 @@ class TradingAgent:
         whale_alerts = self._get_whale_alerts_safe()
         whale_flow = self._analyze_whale_flow_safe()
 
+        # Log sentiment data
+        logger.info("-" * 50)
+        logger.info("MARKET SENTIMENT:")
+        logger.info(f"  Fear & Greed Index: {sentiment.get('score', 'N/A')} ({sentiment.get('label', 'N/A')})")
+        logger.info(f"  Interpretation: {sentiment.get('interpretation', 'N/A')}")
+
+        # Log news feed results
+        logger.info("-" * 50)
+        logger.info(f"NEWS FEED ({len(news)} articles):")
+        if news:
+            for i, article in enumerate(news[:5], 1):  # Show top 5
+                sentiment_emoji = {"positive": "+", "negative": "-", "neutral": "~"}.get(article.get("sentiment", "neutral"), "~")
+                logger.info(f"  [{sentiment_emoji}] {article.get('title', 'N/A')[:80]}")
+        else:
+            logger.info("  No relevant news found")
+
+        # Log whale alerts
+        logger.info("-" * 50)
+        logger.info(f"WHALE ALERTS ({len(whale_alerts)} transactions >$1M):")
+        if whale_alerts:
+            for alert in whale_alerts[:5]:  # Show top 5
+                logger.info(f"  {alert.get('symbol', 'CRYPTO')}: ${alert.get('amount_usd', 0):,.0f} | {alert.get('from_owner', 'unknown')} -> {alert.get('to_owner', 'unknown')}")
+        if whale_flow.get("net_flow", 0) != 0:
+            logger.info(f"  Net Flow: ${whale_flow.get('net_flow', 0):,.0f} ({whale_flow.get('interpretation', 'N/A')})")
+
+        logger.info("-" * 50)
+
         # Process each symbol
         for symbol in self.symbols:
             try:
@@ -153,6 +180,9 @@ class TradingAgent:
             portfolio_manager.save_snapshot()
         except Exception as e:
             logger.error(f"Failed to save portfolio snapshot: {e}")
+
+        # Generate daily AI analysis (once per day per symbol)
+        self._generate_daily_analysis(sentiment, news, whale_flow)
 
         # Cleanup
         cache_manager.cleanup_expired()
@@ -236,19 +266,43 @@ class TradingAgent:
             logger.error(f"Invalid RSI for {symbol}: {rsi}. Refusing to trade.")
             return {"success": False, "error": "Invalid market data: RSI is N/A"}
 
-        logger.info(f"RSI: {rsi:.1f} | "
-                   f"MACD: {indicators.get('macd', 0):.4f}")
+        # Log all technical indicators
+        logger.info("-" * 40)
+        logger.info("TECHNICAL INDICATORS:")
+        logger.info(f"  RSI: {rsi:.1f} {'(OVERBOUGHT)' if indicators.get('rsi_overbought') else '(OVERSOLD)' if indicators.get('rsi_oversold') else ''}")
+        logger.info(f"  MACD: {indicators.get('macd', 0):.4f} | Signal: {indicators.get('macd_signal', 0):.4f} | Histogram: {indicators.get('macd_histogram', 0):.4f}")
+        logger.info(f"  MACD Trend: {'BULLISH' if indicators.get('macd_bullish') else 'BEARISH'} | Histogram Rising: {indicators.get('macd_histogram_rising', False)}")
+        logger.info(f"  EMA2: ${indicators.get('ema2', 0):.2f} | EMA20: ${indicators.get('ema20', 0):.2f}")
+        logger.info(f"  Price vs EMA20: {'ABOVE' if indicators.get('price_above_ema20') else 'BELOW'}")
+        logger.info(f"  Volume SMA: {indicators.get('volume_sma', 0):,.0f}")
 
         # 3. Calculate pivot points
         pivot_points = calculate_pivot_points(ohlcv)
+        logger.info("-" * 40)
+        logger.info("PIVOT POINTS:")
+        logger.info(f"  PP (Pivot): ${pivot_points.get('pp', 0):.2f}")
+        logger.info(f"  R1: ${pivot_points.get('r1', 0):.2f} | R2: ${pivot_points.get('r2', 0):.2f}")
+        logger.info(f"  S1: ${pivot_points.get('s1', 0):.2f} | S2: ${pivot_points.get('s2', 0):.2f}")
+        logger.info(f"  Distance from PP: {pivot_points.get('distance_pct', 0):.2f}%")
 
         # 4. Get forecast
         forecast = get_price_forecast(symbol, ohlcv)
-        logger.info(f"Forecast: {forecast.get('trend', 'N/A')} | "
-                   f"Target: ${forecast.get('target_price', 0):.2f}")
+        logger.info("-" * 40)
+        logger.info("PROPHET FORECAST:")
+        logger.info(f"  Trend: {forecast.get('trend', 'N/A').upper()}")
+        logger.info(f"  Target Price: ${forecast.get('target_price', 0):.2f}")
+        logger.info(f"  Expected Change: {forecast.get('change_pct', 0):+.2f}%")
+        logger.info(f"  Forecast Confidence: {forecast.get('confidence', 0):.1%}")
 
         # 5. Get order book
         orderbook = market_data.get("orderbook", {})
+        logger.info("-" * 40)
+        logger.info("ORDER BOOK:")
+        logger.info(f"  Bid Volume: {orderbook.get('bid_volume', 0):,.2f}")
+        logger.info(f"  Ask Volume: {orderbook.get('ask_volume', 0):,.2f}")
+        logger.info(f"  Bid/Ask Ratio: {orderbook.get('ratio', 0):.2f}")
+        logger.info(f"  Interpretation: {orderbook.get('interpretation', 'N/A')}")
+        logger.info("-" * 40)
 
         # 6. Save market context to database
         context_id = db_ops.save_market_context(
@@ -267,11 +321,6 @@ class TradingAgent:
                 "whale_flow": whale_flow
             }
         )
-
-        # Log whale flow if significant
-        if whale_flow.get("net_flow", 0) != 0:
-            logger.info(f"Whale Flow: {whale_flow.get('interpretation', 'N/A')} | "
-                       f"Net: ${whale_flow.get('net_flow', 0):,.0f}")
 
         # 7. Check if we have an existing position
         has_position = portfolio_manager.client.has_open_position(symbol)
@@ -294,7 +343,20 @@ class TradingAgent:
 
         action = decision.get("action", ACTION_HOLD)
         confidence = decision.get("confidence", 0)
-        logger.info(f"LLM Decision: {action.upper()} | Confidence: {confidence:.2f}")
+
+        # Log detailed LLM decision
+        logger.info("=" * 50)
+        logger.info("LLM DECISION:")
+        logger.info(f"  Action: {action.upper()}")
+        if action != ACTION_HOLD:
+            logger.info(f"  Direction: {decision.get('direction', 'N/A').upper()}")
+            logger.info(f"  Position Size: {decision.get('position_size_pct', 0)}%")
+            logger.info(f"  Leverage: {decision.get('leverage', 1)}x")
+            logger.info(f"  Stop Loss: {decision.get('stop_loss_pct', 0)}%")
+            logger.info(f"  Take Profit: {decision.get('take_profit_pct', 0)}%")
+        logger.info(f"  Confidence: {confidence:.2%}")
+        logger.info(f"  Reasoning: {decision.get('reasoning', 'N/A')}")
+        logger.info("=" * 50)
 
         # 9. Validate decision
         is_valid, sanitized_decision, reason = decision_validator.validate(
@@ -386,6 +448,95 @@ class TradingAgent:
                 "interpretation": "Whale data unavailable",
                 "alert_count": 0
             }
+
+    def _generate_daily_analysis(
+        self,
+        sentiment: Dict[str, Any],
+        news: List[Dict[str, Any]],
+        whale_flow: Dict[str, Any]
+    ) -> None:
+        """
+        Generate daily AI market analysis for each symbol.
+        Only generates once per day per symbol.
+        """
+        for symbol in self.symbols:
+            try:
+                # Check if we need to generate analysis today
+                if not db_ops.should_generate_analysis(symbol):
+                    logger.debug(f"AI analysis for {symbol} already exists for today, skipping")
+                    continue
+
+                logger.info(f"Generating daily AI analysis for {symbol}...")
+
+                # Get latest market context
+                context = db_ops.get_latest_market_context(symbol)
+                if not context:
+                    logger.warning(f"No market context for {symbol}, skipping AI analysis")
+                    continue
+
+                # Extract data from context
+                price = float(context.get("price", 0))
+                indicators = {
+                    "rsi": context.get("rsi"),
+                    "macd": context.get("macd"),
+                    "macd_signal": context.get("macd_signal"),
+                    "macd_histogram": context.get("macd_histogram"),
+                    "ema2": context.get("ema2"),
+                    "ema20": context.get("ema20"),
+                    "macd_bullish": (context.get("macd") or 0) > (context.get("macd_signal") or 0),
+                    "price_above_ema20": price > float(context.get("ema20") or 0)
+                }
+                pivot_points = {
+                    "pp": context.get("pivot_pp"),
+                    "r1": context.get("pivot_r1"),
+                    "r2": context.get("pivot_r2"),
+                    "s1": context.get("pivot_s1"),
+                    "s2": context.get("pivot_s2")
+                }
+                forecast = {
+                    "trend": context.get("forecast_trend"),
+                    "target_price": context.get("forecast_target_price"),
+                    "change_pct": context.get("forecast_change_pct")
+                }
+
+                # Generate analysis using LLM
+                analysis = llm_client.generate_market_analysis(
+                    symbol=symbol,
+                    price=price,
+                    indicators=indicators,
+                    pivot_points=pivot_points,
+                    forecast=forecast,
+                    sentiment=sentiment,
+                    news=news,
+                    whale_flow=whale_flow
+                )
+
+                # Save to database
+                db_ops.save_ai_analysis(
+                    symbol=symbol,
+                    summary_text=analysis.get("summary_text", ""),
+                    market_outlook=analysis.get("market_outlook", "neutral"),
+                    confidence_score=analysis.get("confidence_score", 0.5),
+                    key_levels=analysis.get("key_levels"),
+                    risk_factors=analysis.get("risk_factors"),
+                    opportunities=analysis.get("opportunities"),
+                    trend_strength=analysis.get("trend_strength"),
+                    momentum=analysis.get("momentum"),
+                    volatility_level=analysis.get("volatility_level"),
+                    indicators_snapshot=indicators,
+                    news_sentiment_summary={
+                        "total": len(news),
+                        "positive": sum(1 for n in news if n.get("sentiment") == "positive"),
+                        "negative": sum(1 for n in news if n.get("sentiment") == "negative"),
+                        "sentiment_score": sentiment.get("score"),
+                        "sentiment_label": sentiment.get("label")
+                    }
+                )
+
+                logger.info(f"AI analysis for {symbol} saved: {analysis.get('market_outlook', 'N/A')}")
+
+            except Exception as e:
+                logger.warning(f"Failed to generate AI analysis for {symbol}: {e}")
 
     def shutdown(self) -> None:
         """Clean shutdown of all components."""

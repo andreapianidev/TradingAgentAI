@@ -50,13 +50,13 @@ export default function AlertsPanel({ alerts }: AlertsPanelProps) {
     <div className="card h-full">
       <div className="card-header">
         <div className="flex items-center gap-2">
-          <Bell className="w-5 h-5 text-gray-400" />
+          <Bell className="w-5 h-5 text-gray-500 dark:text-gray-400" />
           <h2 className="card-title">Alerts</h2>
         </div>
         {alerts.length > 0 && (
           <button
             onClick={markAllAsRead}
-            className="text-sm text-gray-400 hover:text-white flex items-center gap-1"
+            className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white flex items-center gap-1"
           >
             <Check className="w-4 h-4" />
             Mark all read
@@ -75,7 +75,7 @@ export default function AlertsPanel({ alerts }: AlertsPanelProps) {
             <div
               key={alert.id}
               className={cn(
-                'bg-gray-800/50 rounded-lg p-3 border-l-2 cursor-pointer hover:bg-gray-800/70 transition-colors',
+                'bg-gray-100 dark:bg-gray-800/50 rounded-lg p-3 border-l-2 cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-800/70 transition-colors',
                 alert.severity === 'critical' ? 'border-red-500' :
                 alert.severity === 'warning' ? 'border-yellow-500' : 'border-blue-500'
               )}
@@ -85,18 +85,18 @@ export default function AlertsPanel({ alerts }: AlertsPanelProps) {
                 {getSeverityIcon(alert.severity)}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
-                    <h4 className="text-sm font-medium text-white truncate">
+                    <h4 className="text-sm font-medium text-gray-900 dark:text-white truncate">
                       {alert.title}
                     </h4>
                     <span className="text-xs text-gray-500 whitespace-nowrap">
                       {formatTimeAgo(alert.created_at)}
                     </span>
                   </div>
-                  <p className="text-sm text-gray-400 mt-1 line-clamp-2">
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
                     {alert.message}
                   </p>
                   {alert.symbol && (
-                    <span className="inline-block mt-2 text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded">
+                    <span className="inline-block mt-2 text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded">
                       {alert.symbol}
                     </span>
                   )}

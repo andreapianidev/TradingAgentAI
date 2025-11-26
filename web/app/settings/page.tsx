@@ -211,10 +211,10 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white">Settings</h1>
-          <p className="text-gray-400">Configure your trading bot parameters</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
+          <p className="text-gray-500 dark:text-gray-400">Configure your trading bot parameters</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -252,11 +252,11 @@ export default function SettingsPage() {
       )}
 
       {/* Warning Banner */}
-      <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 flex items-start gap-3">
-        <AlertTriangle className="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" />
+      <div className="bg-yellow-100 dark:bg-yellow-500/10 border border-yellow-300 dark:border-yellow-500/20 rounded-lg p-4 flex items-start gap-3">
+        <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-500 flex-shrink-0 mt-0.5" />
         <div>
-          <h4 className="text-yellow-500 font-medium">Paper Trading Mode Active</h4>
-          <p className="text-yellow-500/80 text-sm mt-1">
+          <h4 className="text-yellow-700 dark:text-yellow-500 font-medium">Paper Trading Mode Active</h4>
+          <p className="text-yellow-600 dark:text-yellow-500/80 text-sm mt-1">
             The bot is currently running in paper trading mode. No real trades will be executed.
             Change the "Paper Trading Enabled" setting to switch to live trading.
           </p>
@@ -281,10 +281,10 @@ export default function SettingsPage() {
                 {group.settings.map((setting) => (
                   <div
                     key={setting.setting_key}
-                    className="flex items-center justify-between py-3 border-b border-gray-800 last:border-0"
+                    className="flex flex-col sm:flex-row sm:items-center justify-between py-3 border-b border-gray-200 dark:border-gray-800 last:border-0 gap-2"
                   >
                     <div className="flex-1">
-                      <div className="text-white font-medium">
+                      <div className="text-gray-900 dark:text-white font-medium">
                         {formatLabel(setting.setting_key)}
                       </div>
                       {setting.description && (
@@ -293,7 +293,7 @@ export default function SettingsPage() {
                         </div>
                       )}
                     </div>
-                    <div className="ml-4">
+                    <div className="sm:ml-4">
                       {renderSettingInput(setting)}
                     </div>
                   </div>
@@ -320,15 +320,15 @@ export default function SettingsPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
           <div>
             <div className="text-gray-500">Database</div>
-            <div className="text-white">Supabase PostgreSQL</div>
+            <div className="text-gray-900 dark:text-white">Supabase PostgreSQL</div>
           </div>
           <div>
             <div className="text-gray-500">Tables Prefix</div>
-            <div className="text-white">trading_*</div>
+            <div className="text-gray-900 dark:text-white">trading_*</div>
           </div>
           <div>
             <div className="text-gray-500">RLS Enabled</div>
-            <div className="text-green-500">Yes</div>
+            <div className="text-green-600 dark:text-green-500">Yes</div>
           </div>
         </div>
       </div>

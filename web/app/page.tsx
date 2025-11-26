@@ -121,11 +121,11 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       {showAwaitingState && (
-        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 flex items-center gap-3">
-          <AlertTriangle className="w-5 h-5 text-yellow-500" />
+        <div className="bg-yellow-100 dark:bg-yellow-500/10 border border-yellow-300 dark:border-yellow-500/20 rounded-lg p-4 flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-500" />
           <div>
-            <p className="text-yellow-500 font-medium">Awaiting trading data</p>
-            <p className="text-gray-400 text-sm">Start the trading bot to see real-time data</p>
+            <p className="text-yellow-700 dark:text-yellow-500 font-medium">Awaiting trading data</p>
+            <p className="text-gray-600 dark:text-gray-400 text-sm">Start the trading bot to see real-time data</p>
           </div>
         </div>
       )}

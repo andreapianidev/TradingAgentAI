@@ -212,3 +212,33 @@ export interface TradingWhaleFlowSummary {
   alert_count: number
   interpretation?: string
 }
+
+export interface TradingAIAnalysis {
+  id: string
+  created_at: string
+  analysis_date: string
+  symbol: string
+  summary_text: string
+  market_outlook: 'bullish' | 'bearish' | 'neutral' | 'volatile'
+  confidence_score: number
+  key_levels?: {
+    resistance_1?: number
+    resistance_2?: number
+    support_1?: number
+    support_2?: number
+  }
+  risk_factors?: string[]
+  opportunities?: string[]
+  trend_strength?: 'strong' | 'moderate' | 'weak'
+  momentum?: 'increasing' | 'decreasing' | 'stable'
+  volatility_level?: 'high' | 'medium' | 'low'
+  indicators_snapshot?: any
+  news_sentiment_summary?: {
+    total: number
+    positive: number
+    negative: number
+    sentiment_score: number
+    sentiment_label: string
+  }
+  trading_mode: 'paper' | 'live'
+}

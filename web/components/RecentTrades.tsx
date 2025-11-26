@@ -48,7 +48,7 @@ export default function RecentTrades({ decisions }: RecentTradesProps) {
     <div className="card">
       <div className="card-header">
         <h2 className="card-title">Recent Decisions</h2>
-        <span className="text-sm text-gray-400">{decisions.length} latest</span>
+        <span className="text-sm text-gray-500 dark:text-gray-400">{decisions.length} latest</span>
       </div>
 
       {decisions.length === 0 ? (
@@ -71,10 +71,10 @@ export default function RecentTrades({ decisions }: RecentTradesProps) {
             <tbody>
               {decisions.map((decision) => (
                 <tr key={decision.id}>
-                  <td className="text-gray-400 text-sm">
+                  <td className="text-gray-500 dark:text-gray-400 text-sm">
                     {formatTimeAgo(decision.timestamp)}
                   </td>
-                  <td className="font-medium text-white">
+                  <td className="font-medium text-gray-900 dark:text-white">
                     {decision.symbol}
                   </td>
                   <td>
@@ -83,12 +83,12 @@ export default function RecentTrades({ decisions }: RecentTradesProps) {
                       <span className={cn(
                         'text-sm font-medium',
                         decision.action === 'hold' ? 'text-gray-500' :
-                        decision.direction === 'long' ? 'text-green-500' : 'text-red-500'
+                        decision.direction === 'long' ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'
                       )}>
                         {getActionLabel(decision)}
                       </span>
                       {decision.leverage && decision.leverage > 1 && (
-                        <span className="text-xs text-gray-500 bg-gray-700/50 px-1.5 py-0.5 rounded">
+                        <span className="text-xs text-gray-500 bg-gray-200 dark:bg-gray-700/50 px-1.5 py-0.5 rounded">
                           {decision.leverage}x
                         </span>
                       )}
@@ -96,7 +96,7 @@ export default function RecentTrades({ decisions }: RecentTradesProps) {
                   </td>
                   <td>
                     <div className="flex items-center gap-2">
-                      <div className="w-16 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                      <div className="w-16 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                         <div
                           className={cn(
                             'h-full rounded-full',
@@ -106,7 +106,7 @@ export default function RecentTrades({ decisions }: RecentTradesProps) {
                           style={{ width: `${(decision.confidence || 0) * 100}%` }}
                         />
                       </div>
-                      <span className="text-sm text-gray-400">
+                      <span className="text-sm text-gray-500 dark:text-gray-400">
                         {((decision.confidence || 0) * 100).toFixed(0)}%
                       </span>
                     </div>
@@ -122,7 +122,7 @@ export default function RecentTrades({ decisions }: RecentTradesProps) {
                   <td>
                     <button
                       onClick={() => setSelectedDecision(decision)}
-                      className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors"
+                      className="p-1.5 text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
                       title="View reasoning"
                     >
                       <Eye className="w-4 h-4" />
@@ -138,15 +138,15 @@ export default function RecentTrades({ decisions }: RecentTradesProps) {
       {/* Reasoning Modal */}
       {selectedDecision && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-700">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto shadow-xl">
+            <div className="p-6 border-b border-gray-200 dark:border-gray-700">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-white">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                   Decision Reasoning
                 </h3>
                 <button
                   onClick={() => setSelectedDecision(null)}
-                  className="p-1 text-gray-400 hover:text-white"
+                  className="p-1 text-gray-400 hover:text-gray-900 dark:hover:text-white"
                 >
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -158,28 +158,28 @@ export default function RecentTrades({ decisions }: RecentTradesProps) {
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
                   <div className="text-sm text-gray-500">Symbol</div>
-                  <div className="text-white font-medium">{selectedDecision.symbol}</div>
+                  <div className="text-gray-900 dark:text-white font-medium">{selectedDecision.symbol}</div>
                 </div>
                 <div>
                   <div className="text-sm text-gray-500">Action</div>
-                  <div className="text-white font-medium">{getActionLabel(selectedDecision)}</div>
+                  <div className="text-gray-900 dark:text-white font-medium">{getActionLabel(selectedDecision)}</div>
                 </div>
                 <div>
                   <div className="text-sm text-gray-500">Confidence</div>
-                  <div className="text-white font-medium">
+                  <div className="text-gray-900 dark:text-white font-medium">
                     {((selectedDecision.confidence || 0) * 100).toFixed(1)}%
                   </div>
                 </div>
                 <div>
                   <div className="text-sm text-gray-500">Timestamp</div>
-                  <div className="text-white font-medium">
+                  <div className="text-gray-900 dark:text-white font-medium">
                     {new Date(selectedDecision.timestamp).toLocaleString()}
                   </div>
                 </div>
               </div>
               <div>
                 <div className="text-sm text-gray-500 mb-2">Reasoning</div>
-                <div className="bg-gray-800 rounded-lg p-4 text-gray-300 text-sm whitespace-pre-wrap">
+                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 text-gray-700 dark:text-gray-300 text-sm whitespace-pre-wrap">
                   {selectedDecision.reasoning || 'No reasoning provided'}
                 </div>
               </div>

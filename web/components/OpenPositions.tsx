@@ -17,7 +17,6 @@ export default function OpenPositions({ positions }: OpenPositionsProps) {
         body: JSON.stringify({ position_id: positionId })
       })
       if (res.ok) {
-        // Refresh will happen from parent component
         window.location.reload()
       }
     } catch (error) {
@@ -29,7 +28,7 @@ export default function OpenPositions({ positions }: OpenPositionsProps) {
     <div className="card">
       <div className="card-header">
         <h2 className="card-title">Open Positions</h2>
-        <span className="text-sm text-gray-400">{positions.length} active</span>
+        <span className="text-sm text-gray-500 dark:text-gray-400">{positions.length} active</span>
       </div>
 
       {positions.length === 0 ? (
@@ -41,11 +40,11 @@ export default function OpenPositions({ positions }: OpenPositionsProps) {
           {positions.map((position) => (
             <div
               key={position.id}
-              className="bg-gray-800/50 rounded-lg p-4 border border-gray-700/50"
+              className="bg-gray-100 dark:bg-gray-800/50 rounded-lg p-4 border border-gray-200 dark:border-gray-700/50"
             >
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-3">
-                  <span className="text-lg font-semibold text-white">
+                  <span className="text-lg font-semibold text-gray-900 dark:text-white">
                     {position.symbol}
                   </span>
                   <span className={cn(
@@ -64,13 +63,13 @@ export default function OpenPositions({ positions }: OpenPositionsProps) {
                       </span>
                     )}
                   </span>
-                  <span className="text-xs text-gray-500 bg-gray-700/50 px-2 py-0.5 rounded">
+                  <span className="text-xs text-gray-500 bg-gray-200 dark:bg-gray-700/50 px-2 py-0.5 rounded">
                     {position.leverage}x
                   </span>
                 </div>
                 <button
                   onClick={() => handleClosePosition(position.id)}
-                  className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded transition-colors"
+                  className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-100 dark:hover:bg-red-500/10 rounded transition-colors"
                   title="Close position"
                 >
                   <X className="w-4 h-4" />
@@ -80,13 +79,13 @@ export default function OpenPositions({ positions }: OpenPositionsProps) {
               <div className="grid grid-cols-3 gap-4 text-sm">
                 <div>
                   <div className="text-gray-500">Entry Price</div>
-                  <div className="text-white font-medium">
+                  <div className="text-gray-900 dark:text-white font-medium">
                     {formatCurrency(parseFloat(String(position.entry_price)))}
                   </div>
                 </div>
                 <div>
                   <div className="text-gray-500">Size</div>
-                  <div className="text-white font-medium">
+                  <div className="text-gray-900 dark:text-white font-medium">
                     {parseFloat(String(position.quantity)).toFixed(4)}
                   </div>
                 </div>
@@ -104,16 +103,16 @@ export default function OpenPositions({ positions }: OpenPositionsProps) {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-700/50 text-xs text-gray-500">
+              <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200 dark:border-gray-700/50 text-xs text-gray-500">
                 <div className="flex items-center gap-4">
                   {position.stop_loss_price && (
                     <span>
-                      SL: <span className="text-red-500">{formatCurrency(parseFloat(String(position.stop_loss_price)))}</span>
+                      SL: <span className="text-red-600 dark:text-red-500">{formatCurrency(parseFloat(String(position.stop_loss_price)))}</span>
                     </span>
                   )}
                   {position.take_profit_price && (
                     <span>
-                      TP: <span className="text-green-500">{formatCurrency(parseFloat(String(position.take_profit_price)))}</span>
+                      TP: <span className="text-green-600 dark:text-green-500">{formatCurrency(parseFloat(String(position.take_profit_price)))}</span>
                     </span>
                   )}
                 </div>

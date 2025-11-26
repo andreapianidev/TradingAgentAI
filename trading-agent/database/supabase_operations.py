@@ -571,5 +571,80 @@ class SupabaseOperations:
             .execute()
 
 
+    # ============== AI Analysis ==============
+
+    def save_ai_analysis(
+        self,
+        symbol: str,
+        summary_text: str,
+        market_outlook: str,
+        confidence_score: float,
+        key_levels: Dict[str, Any] = None,
+        risk_factors: List[str] = None,
+        opportunities: List[str] = None,
+        trend_strength: str = None,
+        momentum: str = None,
+        volatility_level: str = None,
+        indicators_snapshot: Dict[str, Any] = None,
+        news_sentiment_summary: Dict[str, Any] = None
+    ) -> str:
+        """
+        Save daily AI-generated market analysis.
+        Uses UPSERT to update if analysis for this date/symbol already exists.
+
+        Returns:
+            The ID of the created/updated analysis
+        """
+        from datetime import date
+
+        data = {
+            "analysis_date": date.today().isoformat(),
+            "symbol": symbol,
+            "summary_text": summary_text,
+            "market_outlook": market_outlook,
+            "confidence_score": confidence_score,
+            "key_levels": key_levels,
+            "risk_factors": risk_factors,
+            "opportunities": opportunities,
+            "trend_strength": trend_strength,
+            "momentum": momentum,
+            "volatility_level": volatility_level,
+            "indicators_snapshot": indicators_snapshot,
+            "news_sentiment_summary": news_sentiment_summary,
+            "trading_mode": "paper" if settings.PAPER_TRADING else "live"
+        }
+
+        result = self.client.table("trading_ai_analysis") \
+            .upsert(data, on_conflict="analysis_date,symbol") \
+            .execute()
+
+        analysis_id = result.data[0]["id"]
+        logger.info(f"Saved AI analysis for {symbol} on {date.today()}")
+        return analysis_id
+
+    def get_latest_ai_analysis(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Get the most recent AI analysis for a symbol."""
+        result = self.client.table("trading_ai_analysis") \
+            .select("*") \
+            .eq("symbol", symbol) \
+            .order("analysis_date", desc=True) \
+            .limit(1) \
+            .execute()
+
+        return result.data[0] if result.data else None
+
+    def should_generate_analysis(self, symbol: str) -> bool:
+        """Check if we need to generate new analysis today."""
+        from datetime import date
+
+        result = self.client.table("trading_ai_analysis") \
+            .select("id") \
+            .eq("symbol", symbol) \
+            .eq("analysis_date", date.today().isoformat()) \
+            .execute()
+
+        return len(result.data) == 0
+
+
 # Global operations instance
 db_ops = SupabaseOperations()
