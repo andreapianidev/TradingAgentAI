@@ -679,18 +679,26 @@ class AlpacaClient:
     ) -> Optional[str]:
         """Set a stop loss order."""
         try:
-            from alpaca.trading.requests import StopOrderRequest
+            from alpaca.trading.requests import StopLimitOrderRequest
             from alpaca.trading.enums import OrderSide, TimeInForce
 
             alpaca_symbol = self._get_symbol(symbol)
             side = OrderSide.SELL if direction == "long" else OrderSide.BUY
 
-            order_request = StopOrderRequest(
+            # For crypto, Alpaca requires stop_limit orders, not just stop orders
+            # Set limit price slightly worse than stop price to ensure execution
+            if direction == "long":
+                limit_price = price * 0.995  # 0.5% below stop for sells
+            else:
+                limit_price = price * 1.005  # 0.5% above stop for buys
+
+            order_request = StopLimitOrderRequest(
                 symbol=alpaca_symbol,
                 qty=quantity,
                 side=side,
                 time_in_force=TimeInForce.GTC,
-                stop_price=price
+                stop_price=price,
+                limit_price=limit_price
             )
 
             order = self._retry_request(self.trading_client.submit_order, order_request)
