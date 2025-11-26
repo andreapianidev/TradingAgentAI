@@ -20,14 +20,14 @@ Sviluppare un sistema di trading automatizzato che:
 ### Linguaggi e Framework
 - **Python 3.10+** come linguaggio principale
 - **CCXT** per interazione con exchange (NON usare SDK Python di Hyperliquid)
-- **Anthropic API** per il Large Language Model decisionale
-- **PostgreSQL** come database relazionale
+- **Deepseek API** per il Large Language Model decisionale
+- **Supabase** come database relazionale
 - **Prophet (Meta)** per forecasting dei prezzi
 - **Streamlit** per dashboard di monitoraggio
 - **SQLAlchemy** per ORM database
 - **Pandas/NumPy** per calcoli indicatori
 - **Railway** per deployment come cron job
-
+ALpaca api
 ### Struttura Directory Completa
 trading-agent/
 ├── main.py                      # Entry point principale

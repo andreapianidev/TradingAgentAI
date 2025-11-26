@@ -3,10 +3,16 @@ import { createClient } from '@supabase/supabase-js'
 import { spawn } from 'child_process'
 import path from 'path'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+function getSupabaseClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error('Missing Supabase environment variables')
+  }
+
+  return createClient(supabaseUrl, supabaseKey)
+}
 
 // Store the bot process globally (in-memory for this server instance)
 declare global {
@@ -21,6 +27,8 @@ global.botStartedAt = global.botStartedAt || null
 
 export async function POST() {
   try {
+    const supabase = getSupabaseClient()
+
     // Check if bot is already running
     if (global.botProcess && !global.botProcess.killed) {
       return NextResponse.json({

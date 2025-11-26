@@ -1,6 +1,6 @@
 """
 Paper Trading Client - Simulates trading with real market data.
-Uses real price data from Hyperliquid but executes orders virtually.
+Uses real price data from configured exchange but executes orders virtually.
 """
 import json
 import os
@@ -8,7 +8,6 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 from pathlib import Path
 
-from exchange.hyperliquid_client import HyperliquidClient
 from config.settings import settings
 from utils.logger import get_logger
 
@@ -26,8 +25,9 @@ class PaperTradingClient:
 
     def __init__(self):
         """Initialize the paper trading client."""
-        # Use real client for market data only
-        self._real_client = HyperliquidClient()
+        # Use configured exchange client for market data
+        from exchange.exchange_factory import get_exchange_client
+        self._real_client = get_exchange_client()
         self._connected = False
 
         # Virtual portfolio state
