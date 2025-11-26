@@ -837,5 +837,146 @@ class SupabaseOperations:
         return result.data
 
 
+    # ============== Position Sync ==============
+
+    def sync_positions_from_alpaca(self, alpaca_positions: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Synchronize positions from Alpaca to database.
+        - Closes positions in DB that don't exist on Alpaca
+        - Creates new positions that exist on Alpaca but not in DB
+        - Updates existing positions with current data
+
+        Args:
+            alpaca_positions: List of positions from Alpaca API
+
+        Returns:
+            Sync results with created, updated, closed counts
+        """
+        results = {
+            "created": [],
+            "updated": [],
+            "closed": [],
+            "duplicates_cleaned": 0
+        }
+
+        now = datetime.utcnow().isoformat()
+        trading_mode = "paper" if settings.PAPER_TRADING else "live"
+
+        # Get existing open positions from database
+        db_result = self.client.table("trading_positions") \
+            .select("*") \
+            .eq("status", "open") \
+            .execute()
+
+        db_positions = db_result.data or []
+
+        # Handle duplicates: group by symbol
+        positions_by_symbol = {}
+        for pos in db_positions:
+            symbol = pos["symbol"]
+            if symbol not in positions_by_symbol:
+                positions_by_symbol[symbol] = []
+            positions_by_symbol[symbol].append(pos)
+
+        # Close duplicate positions (keep most recent per symbol)
+        for symbol, positions in positions_by_symbol.items():
+            if len(positions) > 1:
+                # Sort by created_at desc
+                positions.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+                duplicates = positions[1:]
+                for dup in duplicates:
+                    self.client.table("trading_positions") \
+                        .update({
+                            "status": "closed",
+                            "exit_timestamp": now,
+                            "exit_reason": "duplicate_cleanup",
+                            "updated_at": now
+                        }) \
+                        .eq("id", dup["id"]) \
+                        .execute()
+                    results["duplicates_cleaned"] += 1
+                    logger.info(f"Closed duplicate position {dup['id']} for {symbol}")
+
+        # Build map with only most recent position per symbol
+        db_position_map = {
+            symbol: sorted(positions, key=lambda x: x.get("created_at", ""), reverse=True)[0]
+            for symbol, positions in positions_by_symbol.items()
+        }
+
+        # Extract Alpaca symbols set
+        alpaca_symbols = set()
+
+        # Process Alpaca positions
+        for pos in alpaca_positions:
+            symbol = pos.get("symbol", "")
+            # Remove /USD suffix for crypto
+            if "/" in symbol:
+                symbol = symbol.split("/")[0]
+
+            alpaca_symbols.add(symbol)
+
+            qty = abs(float(pos.get("quantity", 0)))
+            direction = pos.get("direction", "long")
+            entry_price = float(pos.get("entry_price", 0))
+            unrealized_pnl = float(pos.get("unrealized_pnl", 0))
+            unrealized_pnl_pct = float(pos.get("unrealized_pnl_pct", 0))
+
+            existing = db_position_map.get(symbol)
+
+            if existing:
+                # Update existing position
+                self.client.table("trading_positions") \
+                    .update({
+                        "quantity": qty,
+                        "entry_price": entry_price,
+                        "unrealized_pnl": unrealized_pnl,
+                        "unrealized_pnl_pct": unrealized_pnl_pct,
+                        "updated_at": now
+                    }) \
+                    .eq("id", existing["id"]) \
+                    .execute()
+                results["updated"].append(symbol)
+                logger.debug(f"Updated position for {symbol}")
+            else:
+                # Create new position
+                self.client.table("trading_positions") \
+                    .insert({
+                        "symbol": symbol,
+                        "direction": direction,
+                        "entry_timestamp": now,
+                        "entry_price": entry_price,
+                        "quantity": qty,
+                        "leverage": 1,
+                        "unrealized_pnl": unrealized_pnl,
+                        "unrealized_pnl_pct": unrealized_pnl_pct,
+                        "status": "open",
+                        "trading_mode": trading_mode
+                    }) \
+                    .execute()
+                results["created"].append(symbol)
+                logger.info(f"Created position from Alpaca sync: {symbol}")
+
+        # Close positions that exist in DB but not in Alpaca
+        for symbol, position in db_position_map.items():
+            if symbol not in alpaca_symbols:
+                self.client.table("trading_positions") \
+                    .update({
+                        "status": "closed",
+                        "exit_timestamp": now,
+                        "exit_reason": "sync_not_found_on_alpaca",
+                        "updated_at": now
+                    }) \
+                    .eq("id", position["id"]) \
+                    .execute()
+                results["closed"].append(symbol)
+                logger.info(f"Closed position not found on Alpaca: {symbol}")
+
+        logger.info(f"Position sync complete: created={len(results['created'])}, "
+                   f"updated={len(results['updated'])}, closed={len(results['closed'])}, "
+                   f"duplicates_cleaned={results['duplicates_cleaned']}")
+
+        return results
+
+
 # Global operations instance
 db_ops = SupabaseOperations()

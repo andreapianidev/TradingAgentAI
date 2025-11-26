@@ -110,8 +110,43 @@ export async function POST() {
 
     if (fetchError) throw fetchError
 
+    // Handle duplicates: group by symbol, keep only the most recent, close the rest
+    const positionsBySymbol = new Map<string, typeof dbPositions>()
+    for (const pos of (dbPositions || [])) {
+      if (!positionsBySymbol.has(pos.symbol)) {
+        positionsBySymbol.set(pos.symbol, [])
+      }
+      positionsBySymbol.get(pos.symbol)!.push(pos)
+    }
+
+    // Close duplicate positions (keep the most recent one per symbol)
+    const now = new Date().toISOString()
+    for (const [symbol, positions] of Array.from(positionsBySymbol.entries())) {
+      if (positions.length > 1) {
+        // Sort by created_at desc, keep first, close the rest
+        positions.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        const duplicates = positions.slice(1)
+        for (const dup of duplicates) {
+          await supabase
+            .from('trading_positions')
+            .update({
+              status: 'closed',
+              exit_timestamp: now,
+              exit_reason: 'duplicate_cleanup',
+              updated_at: now,
+            })
+            .eq('id', dup.id)
+          console.log(`Closed duplicate position ${dup.id} for ${symbol}`)
+        }
+      }
+    }
+
+    // Build map with only the most recent position per symbol
     const dbPositionMap = new Map(
-      (dbPositions || []).map(p => [p.symbol, p])
+      Array.from(positionsBySymbol.entries()).map(([symbol, positions]) => {
+        // positions are already sorted, first is most recent
+        return [symbol, positions[0]]
+      })
     )
 
     const results = {
@@ -120,7 +155,6 @@ export async function POST() {
       closed: [] as string[],
     }
 
-    const now = new Date().toISOString()
     const tradingMode = ALPACA_PAPER ? 'paper' : 'live'
 
     // Process Alpaca positions

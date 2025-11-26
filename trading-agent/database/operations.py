@@ -221,6 +221,15 @@ class DatabaseOperations:
         """Get trading statistics."""
         return supabase_ops.get_trading_stats()
 
+    # ============== Position Sync ==============
+
+    def sync_positions_from_alpaca(
+        self,
+        alpaca_positions: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Sync positions from Alpaca to database."""
+        return supabase_ops.sync_positions_from_alpaca(alpaca_positions)
+
 
 # Global operations instance
 db_ops = DatabaseOperations()

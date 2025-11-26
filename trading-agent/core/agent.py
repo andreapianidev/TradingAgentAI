@@ -65,6 +65,10 @@ class TradingAgent:
             # Set initial equity for P&L tracking
             portfolio_manager.set_initial_equity()
 
+            # Sync positions from Alpaca to database
+            logger.info("Syncing positions from Alpaca...")
+            self._sync_alpaca_positions()
+
             # Test LLM connection
             logger.info("Testing LLM connection...")
             if not llm_client.test_connection():
@@ -403,6 +407,34 @@ class TradingAgent:
             "trade_id": execution_result.get("trade_id"),
             "result": execution_result.get("result"),
         }
+
+    def _sync_alpaca_positions(self) -> None:
+        """
+        Sync positions from Alpaca to database at startup.
+        This ensures the database reflects the actual positions on Alpaca.
+        """
+        try:
+            # Get positions from Alpaca
+            portfolio = portfolio_manager.get_portfolio_state()
+            alpaca_positions = portfolio.get("positions", [])
+
+            logger.info(f"Found {len(alpaca_positions)} positions on Alpaca")
+
+            # Sync to database
+            sync_result = db_ops.sync_positions_from_alpaca(alpaca_positions)
+
+            if sync_result["created"]:
+                logger.info(f"Created positions: {sync_result['created']}")
+            if sync_result["updated"]:
+                logger.info(f"Updated positions: {sync_result['updated']}")
+            if sync_result["closed"]:
+                logger.info(f"Closed positions not on Alpaca: {sync_result['closed']}")
+            if sync_result["duplicates_cleaned"]:
+                logger.info(f"Cleaned up {sync_result['duplicates_cleaned']} duplicate positions")
+
+        except Exception as e:
+            logger.warning(f"Failed to sync positions from Alpaca: {e}")
+            # Don't fail initialization if sync fails
 
     def _get_sentiment_safe(self) -> Dict[str, Any]:
         """Get sentiment with error handling."""
