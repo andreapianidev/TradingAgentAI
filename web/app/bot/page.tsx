@@ -39,11 +39,42 @@ interface ActivityLog {
   url?: string
 }
 
+interface LiveAccountData {
+  success: boolean
+  configured: boolean
+  timestamp?: string
+  account?: {
+    equity: number
+    cash: number
+    buyingPower: number
+    positionsValue: number
+    lastEquity: number
+    dailyPnl: number
+    dailyPnlPct: number
+    totalUnrealizedPnl: number
+    exposurePct: number
+    positionsCount: number
+  }
+  positions?: Array<{
+    symbol: string
+    qty: number
+    entryPrice: number
+    currentPrice: number
+    marketValue: number
+    unrealizedPnl: number
+    unrealizedPnlPct: number
+    changeToday: number
+  }>
+  mode?: 'paper' | 'live'
+  error?: string
+}
+
 type FilterType = 'all' | 'decision' | 'market' | 'portfolio' | 'news' | 'whale'
 
 export default function BotConsolePage() {
   const [activities, setActivities] = useState<ActivityLog[]>([])
   const [latestSnapshot, setLatestSnapshot] = useState<TradingPortfolioSnapshot | null>(null)
+  const [liveAccount, setLiveAccount] = useState<LiveAccountData | null>(null)
   const [loading, setLoading] = useState(true)
   const [autoScroll, setAutoScroll] = useState(true)
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set())
@@ -53,8 +84,13 @@ export default function BotConsolePage() {
 
   useEffect(() => {
     fetchActivityData()
-    const interval = setInterval(fetchActivityData, 5000) // Poll every 5 seconds
-    return () => clearInterval(interval)
+    fetchLiveAccount()
+    const activityInterval = setInterval(fetchActivityData, 5000) // Poll every 5 seconds
+    const liveInterval = setInterval(fetchLiveAccount, 10000) // Live data every 10 seconds
+    return () => {
+      clearInterval(activityInterval)
+      clearInterval(liveInterval)
+    }
   }, [])
 
   useEffect(() => {
@@ -265,6 +301,18 @@ export default function BotConsolePage() {
     }
   }
 
+  const fetchLiveAccount = async () => {
+    try {
+      const response = await fetch('/api/account/live')
+      const data: LiveAccountData = await response.json()
+      if (data.success) {
+        setLiveAccount(data)
+      }
+    } catch (error) {
+      console.error('Failed to fetch live account data:', error)
+    }
+  }
+
   const clearOldLogs = async () => {
     // This just clears the local view - keeps the database data
     setActivities([])
@@ -401,37 +449,140 @@ export default function BotConsolePage() {
         </div>
       </div>
 
-      {/* Status Bar */}
-      {latestSnapshot && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-800">
-          <div className="flex items-center gap-3">
-            <DollarSign className="w-5 h-5 text-green-500" />
-            <div>
-              <div className="text-xs text-gray-500">Equity</div>
-              <div className="font-bold text-gray-900 dark:text-white">{formatCurrency(Number(latestSnapshot.total_equity_usdc) || 0)}</div>
+      {/* Live Portfolio Status Bar */}
+      {(liveAccount?.account || latestSnapshot) && (
+        <div className="border-b border-gray-200 dark:border-gray-800">
+          {/* Main Portfolio Value */}
+          <div className="p-4 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-900/50 dark:to-gray-800/30">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-green-500/10 rounded-xl">
+                  <DollarSign className="w-8 h-8 text-green-500" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500 uppercase tracking-wide">Portfolio Value</span>
+                    {liveAccount?.configured && (
+                      <span className="flex items-center gap-1 px-1.5 py-0.5 bg-green-500/10 text-green-500 text-xs rounded">
+                        <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                        LIVE
+                      </span>
+                    )}
+                    {liveAccount?.mode === 'paper' && (
+                      <span className="px-1.5 py-0.5 bg-yellow-500/10 text-yellow-600 text-xs rounded">
+                        PAPER
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-3xl font-bold text-gray-900 dark:text-white">
+                    {formatCurrency(liveAccount?.account?.equity ?? Number(latestSnapshot?.total_equity_usdc) ?? 0)}
+                  </div>
+                  {liveAccount?.account && (
+                    <div className={cn(
+                      "flex items-center gap-1 text-sm font-medium",
+                      liveAccount.account.dailyPnl >= 0 ? "text-green-500" : "text-red-500"
+                    )}>
+                      {liveAccount.account.dailyPnl >= 0 ? (
+                        <TrendingUp className="w-4 h-4" />
+                      ) : (
+                        <TrendingDown className="w-4 h-4" />
+                      )}
+                      <span>{liveAccount.account.dailyPnl >= 0 ? '+' : ''}{formatCurrency(liveAccount.account.dailyPnl)}</span>
+                      <span className="text-gray-500">({liveAccount.account.dailyPnlPct >= 0 ? '+' : ''}{liveAccount.account.dailyPnlPct.toFixed(2)}%)</span>
+                      <span className="text-xs text-gray-400 ml-1">today</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {liveAccount?.timestamp && (
+                <div className="text-xs text-gray-400">
+                  Updated: {new Date(liveAccount.timestamp).toLocaleTimeString('it-IT')}
+                </div>
+              )}
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <Activity className="w-5 h-5 text-blue-500" />
-            <div>
-              <div className="text-xs text-gray-500">Available</div>
-              <div className="font-bold text-gray-900 dark:text-white">{formatCurrency(Number(latestSnapshot.available_balance_usdc) || 0)}</div>
+
+          {/* Breakdown Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 p-4 bg-gray-50/50 dark:bg-gray-900/30">
+            <div className="flex items-center gap-3">
+              <Activity className="w-5 h-5 text-blue-500" />
+              <div>
+                <div className="text-xs text-gray-500">Cash</div>
+                <div className="font-bold text-gray-900 dark:text-white">
+                  {formatCurrency(liveAccount?.account?.cash ?? Number(latestSnapshot?.available_balance_usdc) ?? 0)}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <BarChart3 className="w-5 h-5 text-purple-500" />
+              <div>
+                <div className="text-xs text-gray-500">Invested</div>
+                <div className="font-bold text-gray-900 dark:text-white">
+                  {formatCurrency(liveAccount?.account?.positionsValue ?? 0)}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              {(liveAccount?.account?.totalUnrealizedPnl ?? 0) >= 0 ? (
+                <TrendingUp className="w-5 h-5 text-green-500" />
+              ) : (
+                <TrendingDown className="w-5 h-5 text-red-500" />
+              )}
+              <div>
+                <div className="text-xs text-gray-500">Unrealized P&L</div>
+                <div className={cn(
+                  "font-bold",
+                  (liveAccount?.account?.totalUnrealizedPnl ?? 0) >= 0 ? "text-green-500" : "text-red-500"
+                )}>
+                  {(liveAccount?.account?.totalUnrealizedPnl ?? 0) >= 0 ? '+' : ''}{formatCurrency(liveAccount?.account?.totalUnrealizedPnl ?? 0)}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Target className="w-5 h-5 text-yellow-500" />
+              <div>
+                <div className="text-xs text-gray-500">Exposure</div>
+                <div className="font-bold text-gray-900 dark:text-white">
+                  {(liveAccount?.account?.exposurePct ?? Number(latestSnapshot?.exposure_pct) ?? 0).toFixed(1)}%
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Bot className="w-5 h-5 text-cyan-500" />
+              <div>
+                <div className="text-xs text-gray-500">Positions</div>
+                <div className="font-bold text-gray-900 dark:text-white">
+                  {liveAccount?.account?.positionsCount ?? latestSnapshot?.open_positions_count ?? 0}
+                </div>
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <TrendingUp className="w-5 h-5 text-yellow-500" />
-            <div>
-              <div className="text-xs text-gray-500">Exposure</div>
-              <div className="font-bold text-gray-900 dark:text-white">{(Number(latestSnapshot.exposure_pct) || 0).toFixed(1)}%</div>
+
+          {/* Open Positions Detail */}
+          {liveAccount?.positions && liveAccount.positions.length > 0 && (
+            <div className="px-4 pb-4 bg-gray-50/50 dark:bg-gray-900/30">
+              <div className="text-xs text-gray-500 mb-2 uppercase tracking-wide">Open Positions</div>
+              <div className="flex flex-wrap gap-2">
+                {liveAccount.positions.map(pos => (
+                  <div
+                    key={pos.symbol}
+                    className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+                  >
+                    <span className="font-semibold text-gray-900 dark:text-white">{pos.symbol}</span>
+                    <span className="text-xs text-gray-500">{formatCurrency(pos.marketValue)}</span>
+                    <span className={cn(
+                      "text-xs font-medium px-1.5 py-0.5 rounded",
+                      pos.unrealizedPnl >= 0
+                        ? "bg-green-500/10 text-green-500"
+                        : "bg-red-500/10 text-red-500"
+                    )}>
+                      {pos.unrealizedPnl >= 0 ? '+' : ''}{pos.unrealizedPnlPct.toFixed(2)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <Bot className="w-5 h-5 text-purple-500" />
-            <div>
-              <div className="text-xs text-gray-500">Open Positions</div>
-              <div className="font-bold text-gray-900 dark:text-white">{latestSnapshot.open_positions_count || 0}</div>
-            </div>
-          </div>
+          )}
         </div>
       )}
 

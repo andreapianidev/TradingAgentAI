@@ -204,10 +204,38 @@ class AlpacaClient:
             low_24h = min((b.low for b in bars_data), default=0) if bars_data else 0
             volume_24h = sum(b.volume for b in bars_data) if bars_data else 0
 
+            # Get last close price from bars as fallback
+            last_bar_close = float(bars_data[-1].close) if bars_data else 0
+
             # Current price (mid price from bid/ask)
             bid = float(quote_data.bid_price) if quote_data else 0
             ask = float(quote_data.ask_price) if quote_data else 0
             price = (bid + ask) / 2 if bid and ask else bid or ask
+
+            # Fallback to last bar close if quote price is 0
+            if price <= 0 and last_bar_close > 0:
+                price = last_bar_close
+                logger.warning(f"Quote price was 0 for {symbol}, using last bar close: ${last_bar_close:.2f}")
+
+            # If still 0, retry once with fresh quote
+            if price <= 0:
+                logger.warning(f"Price still 0 for {symbol}, retrying quote...")
+                time.sleep(1)
+                if self._is_crypto:
+                    request = CryptoLatestQuoteRequest(symbol_or_symbols=alpaca_symbol)
+                    quote = self._retry_request(self.crypto_client.get_crypto_latest_quote, request)
+                    quote_data = quote.data.get(alpaca_symbol) if hasattr(quote, 'data') else quote.get(alpaca_symbol)
+                else:
+                    request = StockLatestQuoteRequest(symbol_or_symbols=alpaca_symbol)
+                    quote = self._retry_request(self.data_client.get_stock_latest_quote, request)
+                    quote_data = quote.data.get(alpaca_symbol) if hasattr(quote, 'data') else quote.get(alpaca_symbol)
+
+                bid = float(quote_data.bid_price) if quote_data else 0
+                ask = float(quote_data.ask_price) if quote_data else 0
+                price = (bid + ask) / 2 if bid and ask else bid or ask
+
+                if price <= 0 and last_bar_close > 0:
+                    price = last_bar_close
 
             # Calculate 24h change
             if bars_data and len(bars_data) > 0:
