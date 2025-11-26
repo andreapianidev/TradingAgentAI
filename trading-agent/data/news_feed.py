@@ -106,6 +106,10 @@ class NewsFeedCollector:
         feeds = [self.feed_url] if self.feed_url else self.default_feeds
         successful_feeds = 0
         failed_feeds = 0
+        successful_sources = []
+        failed_sources = []
+
+        logger.info(f"Fetching news from {len(feeds)} RSS feeds...")
 
         for feed_url in feeds:
             if not feed_url:
@@ -113,28 +117,53 @@ class NewsFeedCollector:
 
             try:
                 news = self._parse_feed(feed_url)
+                # Extract source name for logging
+                try:
+                    from urllib.parse import urlparse
+                    source_name = urlparse(feed_url).netloc.replace("www.", "")
+                except Exception:
+                    source_name = feed_url[:30]
+
                 # Deduplicate while adding
+                added_count = 0
                 for item in news:
                     news_hash = item.get("hash", "")
                     if news_hash and news_hash not in self._seen_hashes:
                         self._seen_hashes.add(news_hash)
                         all_news.append(item)
+                        added_count += 1
                     elif not news_hash:
                         # No hash, add anyway but log
                         all_news.append(item)
+                        added_count += 1
+
                 successful_feeds += 1
+                successful_sources.append(f"{source_name} ({added_count})")
+                logger.debug(f"  OK: {source_name} - {added_count} articles")
             except Exception as e:
                 failed_feeds += 1
-                logger.warning(f"Error fetching feed {feed_url}: {e}")
+                try:
+                    from urllib.parse import urlparse
+                    source_name = urlparse(feed_url).netloc.replace("www.", "")
+                except Exception:
+                    source_name = feed_url[:30]
+                failed_sources.append(source_name)
+                logger.warning(f"  FAIL: {source_name} - {e}")
 
-        # Log dedup stats
-        if len(self._seen_hashes) > 0:
-            logger.debug(f"News fetch: {successful_feeds} feeds OK, {failed_feeds} failed, "
-                        f"{len(all_news)} unique articles (deduped from {len(self._seen_hashes)} hashes)")
+        # Log summary with sources
+        logger.info(f"RSS Feeds: {successful_feeds}/{len(feeds)} OK | {len(all_news)} total articles")
+        if successful_sources:
+            logger.info(f"  Sources: {', '.join(successful_sources)}")
+        if failed_sources:
+            logger.warning(f"  Failed: {', '.join(failed_sources)}")
 
-        # Sort by date and filter
+        # Sort by date and filter for crypto relevance
+        pre_filter_count = len(all_news)
         all_news = self._filter_relevant_news(all_news)
         all_news.sort(key=lambda x: x.get("published_at", ""), reverse=True)
+
+        if pre_filter_count > 0:
+            logger.info(f"  Crypto-relevant: {len(all_news)}/{pre_filter_count} articles passed filter")
 
         return all_news
 
