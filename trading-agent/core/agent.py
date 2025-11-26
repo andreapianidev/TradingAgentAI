@@ -219,11 +219,24 @@ class TradingAgent:
             return {"success": False, "error": "No OHLCV data"}
 
         price = market_data.get("price", 0)
+
+        # Safety check: refuse to trade with invalid market data
+        if price <= 0:
+            logger.error(f"Invalid price for {symbol}: ${price}. Refusing to trade.")
+            return {"success": False, "error": "Invalid market data: price is 0"}
+
         logger.info(f"Price: ${price:.2f} | 24h: {market_data.get('change_24h', 0):.2f}%")
 
         # 2. Calculate indicators
         indicators = calculate_indicators(ohlcv)
-        logger.info(f"RSI: {indicators.get('rsi', 0):.1f} | "
+
+        # Safety check: refuse to trade without valid indicators
+        rsi = indicators.get('rsi')
+        if rsi is None or not isinstance(rsi, (int, float)):
+            logger.error(f"Invalid RSI for {symbol}: {rsi}. Refusing to trade.")
+            return {"success": False, "error": "Invalid market data: RSI is N/A"}
+
+        logger.info(f"RSI: {rsi:.1f} | "
                    f"MACD: {indicators.get('macd', 0):.4f}")
 
         # 3. Calculate pivot points
