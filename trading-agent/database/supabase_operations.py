@@ -729,9 +729,10 @@ class SupabaseOperations:
 
     def save_analyzed_news_batch(self, analyzed_items: List[Dict[str, Any]]) -> int:
         """
-        Save AI-analyzed news items with enhanced sentiment data.
+        Save AI-analyzed news items with enhanced sentiment data using batch upsert.
 
-        This updates existing news items with AI analysis or creates new entries.
+        This updates existing news items with AI analysis or creates new entries
+        in a single efficient database operation.
 
         Args:
             analyzed_items: List of analyzed news items from news_analyzer
@@ -742,7 +743,8 @@ class SupabaseOperations:
         if not analyzed_items:
             return 0
 
-        saved_count = 0
+        # Prepare all records for batch upsert
+        records = []
         for item in analyzed_items:
             try:
                 url = item.get("url")
@@ -773,7 +775,7 @@ class SupabaseOperations:
                     "age_hours": item.get("age_hours", 0),
                 }
 
-                data = {
+                records.append({
                     "title": item.get("title", "")[:500],
                     "summary": item.get("summary", "")[:1000],
                     "source": item.get("source", "RSS Feed"),
@@ -782,33 +784,39 @@ class SupabaseOperations:
                     "sentiment": item.get("sentiment", "neutral"),
                     "symbols": item.get("affected_symbols"),
                     "raw_data": ai_analysis
-                }
-
-                # Check if news exists
-                existing = self.client.table("trading_news") \
-                    .select("id") \
-                    .eq("url", url) \
-                    .execute()
-
-                if existing.data:
-                    # Update with AI analysis
-                    self.client.table("trading_news") \
-                        .update({"raw_data": ai_analysis, "sentiment": item.get("sentiment", "neutral")}) \
-                        .eq("url", url) \
-                        .execute()
-                else:
-                    # Insert new
-                    self.client.table("trading_news").insert(data).execute()
-
-                saved_count += 1
+                })
 
             except Exception as e:
-                logger.debug(f"Error saving analyzed news item: {e}")
+                logger.debug(f"Error preparing analyzed news item: {e}")
                 continue
 
-        if saved_count > 0:
-            logger.info(f"Saved/updated {saved_count} AI-analyzed news items to database")
-        return saved_count
+        if not records:
+            return 0
+
+        try:
+            # Single batch upsert - much more efficient than N individual queries
+            result = self.client.table("trading_news") \
+                .upsert(records, on_conflict="url") \
+                .execute()
+
+            saved_count = len(result.data) if result.data else 0
+            if saved_count > 0:
+                logger.info(f"Batch upserted {saved_count} AI-analyzed news items to database")
+            return saved_count
+
+        except Exception as e:
+            logger.warning(f"Batch upsert failed for analyzed news, falling back to individual upserts: {e}")
+            # Fallback to individual upserts if batch fails
+            saved_count = 0
+            for record in records:
+                try:
+                    self.client.table("trading_news") \
+                        .upsert(record, on_conflict="url") \
+                        .execute()
+                    saved_count += 1
+                except Exception as inner_e:
+                    logger.debug(f"Error saving analyzed news item: {inner_e}")
+            return saved_count
 
     # ============== Whale Alerts ==============
 
