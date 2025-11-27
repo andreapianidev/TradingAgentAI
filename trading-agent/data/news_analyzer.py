@@ -182,7 +182,16 @@ class DeepSeekNewsClient:
         if len(content) > max_content_length:
             content = content[:max_content_length] + "..."
 
-        prompt = NEWS_ANALYSIS_PROMPT.format(title=title, content=content)
+        system_prompt = "Sei un analista finanziario crypto. Rispondi SOLO in JSON valido."
+        user_prompt = NEWS_ANALYSIS_PROMPT.format(title=title, content=content)
+
+        # Log the LLM request for conversations page
+        from utils.logger import log_llm_request
+        log_llm_request(
+            symbol="NEWS",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt
+        )
 
         for attempt in range(max_retries + 1):
             try:
@@ -200,8 +209,8 @@ class DeepSeekNewsClient:
                     json={
                         "model": self.model,
                         "messages": [
-                            {"role": "system", "content": "Sei un analista finanziario crypto. Rispondi SOLO in JSON valido."},
-                            {"role": "user", "content": prompt},
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
                         ],
                         "temperature": 0.3,
                         "max_tokens": 800,
@@ -241,12 +250,36 @@ class DeepSeekNewsClient:
 
                 # Use robust JSON parsing
                 analysis = self._parse_deepseek_response(content_text)
+
+                # Log the LLM response for conversations page
+                from utils.logger import log_llm_response
                 if analysis:
                     # Add cost metadata to analysis result
                     analysis["_cost_usd"] = cost_usd
                     analysis["_input_tokens"] = input_tokens
                     analysis["_output_tokens"] = output_tokens
+
+                    # Log successful response with parsed analysis
+                    log_llm_response(
+                        symbol="NEWS",
+                        response=content_text,
+                        decision={
+                            "action": "news_analysis",
+                            "title": title[:100],
+                            "sentiment": analysis.get("sentiment"),
+                            "impact": analysis.get("impact"),
+                            "key_points": analysis.get("key_points", [])[:3],  # First 3 key points
+                            "symbols_mentioned": analysis.get("symbols_mentioned", [])
+                        }
+                    )
                     return analysis
+                else:
+                    # Log failed parsing
+                    log_llm_response(
+                        symbol="NEWS",
+                        response=content_text,
+                        decision=None  # Indicates parse error
+                    )
 
                 # If parsing failed but no exception, don't retry
                 logger.warning(f"Could not parse DeepSeek response for: {title[:50]}")

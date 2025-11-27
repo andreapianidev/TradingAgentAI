@@ -205,6 +205,7 @@ export default function ConversationsPage() {
   }
 
   const getActionIcon = (action?: string, direction?: string) => {
+    if (action === 'news_analysis') return <MessageSquare className="w-4 h-4 text-blue-500" />
     if (action === 'hold') return <Minus className="w-4 h-4 text-gray-500" />
     if (action === 'open') {
       return direction === 'long'
@@ -221,6 +222,7 @@ export default function ConversationsPage() {
 
   const getActionColor = (action?: string) => {
     switch (action) {
+      case 'news_analysis': return 'text-blue-500 bg-blue-500/10 border-blue-500/30'
       case 'open': return 'text-green-500 bg-green-500/10 border-green-500/30'
       case 'close': return 'text-red-500 bg-red-500/10 border-red-500/30'
       case 'hold': return 'text-gray-400 bg-gray-500/10 border-gray-500/30'
