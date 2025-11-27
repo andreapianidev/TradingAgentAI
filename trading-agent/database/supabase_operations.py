@@ -715,6 +715,89 @@ class SupabaseOperations:
             logger.info(f"Saved {saved_count} news items to database")
         return saved_count
 
+    def save_analyzed_news_batch(self, analyzed_items: List[Dict[str, Any]]) -> int:
+        """
+        Save AI-analyzed news items with enhanced sentiment data.
+
+        This updates existing news items with AI analysis or creates new entries.
+
+        Args:
+            analyzed_items: List of analyzed news items from news_analyzer
+
+        Returns:
+            Number of items saved/updated
+        """
+        if not analyzed_items:
+            return 0
+
+        saved_count = 0
+        for item in analyzed_items:
+            try:
+                url = item.get("url")
+                if not url:
+                    continue
+
+                # Parse published_at if it's a string
+                published_at = item.get("published_at")
+                if isinstance(published_at, str):
+                    try:
+                        from dateutil import parser
+                        published_at = parser.parse(published_at).isoformat()
+                    except Exception:
+                        published_at = datetime.utcnow().isoformat()
+
+                # Build AI analysis data
+                ai_analysis = {
+                    "ai_summary": item.get("summary", ""),
+                    "ai_sentiment": item.get("sentiment", "neutral"),
+                    "ai_sentiment_score": item.get("sentiment_score", 0.0),
+                    "ai_impact_level": item.get("impact_level", "low"),
+                    "ai_affected_symbols": item.get("affected_symbols", []),
+                    "ai_key_points": item.get("key_points", []),
+                    "ai_market_implications": item.get("market_implications", ""),
+                    "analysis_method": item.get("analysis_method", "deepseek"),
+                    "has_full_content": item.get("has_full_content", False),
+                    "content_length": item.get("content_length", 0),
+                    "age_hours": item.get("age_hours", 0),
+                }
+
+                data = {
+                    "title": item.get("title", "")[:500],
+                    "summary": item.get("summary", "")[:1000],
+                    "source": item.get("source", "RSS Feed"),
+                    "url": url,
+                    "published_at": published_at,
+                    "sentiment": item.get("sentiment", "neutral"),
+                    "symbols": item.get("affected_symbols"),
+                    "raw_data": ai_analysis
+                }
+
+                # Check if news exists
+                existing = self.client.table("trading_news") \
+                    .select("id") \
+                    .eq("url", url) \
+                    .execute()
+
+                if existing.data:
+                    # Update with AI analysis
+                    self.client.table("trading_news") \
+                        .update({"raw_data": ai_analysis, "sentiment": item.get("sentiment", "neutral")}) \
+                        .eq("url", url) \
+                        .execute()
+                else:
+                    # Insert new
+                    self.client.table("trading_news").insert(data).execute()
+
+                saved_count += 1
+
+            except Exception as e:
+                logger.debug(f"Error saving analyzed news item: {e}")
+                continue
+
+        if saved_count > 0:
+            logger.info(f"Saved/updated {saved_count} AI-analyzed news items to database")
+        return saved_count
+
     # ============== Whale Alerts ==============
 
     def save_whale_alert(

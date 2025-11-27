@@ -23,6 +23,10 @@ prophet>=1.1.5
 # HTTP Client
 httpx>=0.26.0
 
+# Web Scraping (for news article extraction)
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+
 # Dashboard
 streamlit>=1.30.0
 plotly>=5.18.0

@@ -60,7 +60,7 @@ class DeepSeekClient:
         forecast: Dict[str, Any],
         orderbook: Dict[str, Any],
         sentiment: Dict[str, Any],
-        news: List[Dict[str, Any]],
+        news_data: Dict[str, Any],
         open_positions: List[Dict[str, Any]],
         whale_flow: Dict[str, Any] = None,
         coingecko: Dict[str, Any] = None
@@ -76,8 +76,8 @@ class DeepSeekClient:
             pivot_points: Pivot point levels
             forecast: Prophet forecast
             orderbook: Order book data
-            sentiment: Market sentiment
-            news: Recent news
+            sentiment: Market sentiment (Fear & Greed Index)
+            news_data: Advanced news analysis data with aggregated sentiment
             open_positions: Currently open positions
             whale_flow: Whale capital flow analysis
             coingecko: CoinGecko market data (global, trending, coins)
@@ -107,7 +107,7 @@ class DeepSeekClient:
                 forecast=forecast,
                 orderbook=orderbook,
                 sentiment=sentiment,
-                news=news,
+                news_data=news_data,
                 open_positions=open_positions,
                 whale_flow=whale_flow,
                 coingecko=coingecko
@@ -344,7 +344,7 @@ class DeepSeekClient:
         pivot_points: Dict[str, Any],
         forecast: Dict[str, Any],
         sentiment: Dict[str, Any],
-        news: List[Dict[str, Any]],
+        news_data: Dict[str, Any],
         whale_flow: Dict[str, Any] = None
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
@@ -356,8 +356,8 @@ class DeepSeekClient:
             indicators: Technical indicators
             pivot_points: Pivot point levels
             forecast: Prophet forecast
-            sentiment: Market sentiment
-            news: Recent news articles
+            sentiment: Market sentiment (Fear & Greed)
+            news_data: Advanced news analysis data from news_analyzer
             whale_flow: Whale capital flow
 
         Returns:
@@ -371,12 +371,20 @@ Genera un'analisi di mercato concisa e professionale in italiano.
 La tua analisi deve essere oggettiva, basata sui dati forniti, e utile per i trader.
 Rispondi SOLO con un JSON valido senza markdown o commenti."""
 
-            # Build analysis prompt
+            # Build advanced news summary from analysis
             news_summary = ""
-            if news:
-                positive = sum(1 for n in news if n.get("sentiment") == "positive")
-                negative = sum(1 for n in news if n.get("sentiment") == "negative")
-                news_summary = f"News sentiment: {positive} positive, {negative} negative, {len(news) - positive - negative} neutral"
+            if news_data:
+                agg_sentiment = news_data.get("aggregated_sentiment", {})
+                symbol_sentiment = news_data.get("symbol_sentiment", {})
+                total_analyzed = news_data.get("total_analyzed", 0)
+                high_impact = news_data.get("high_impact_count", 0)
+
+                news_summary = f"""NEWS SENTIMENT (AI-analyzed):
+- Articles analyzed: {total_analyzed}
+- High impact news: {high_impact}
+- Aggregated score: {agg_sentiment.get('score', 0):.2f} ({agg_sentiment.get('label', 'neutral')})
+- {symbol} specific: {symbol_sentiment.get('score', 0):.2f} ({symbol_sentiment.get('label', 'neutral')})
+- Interpretation: {agg_sentiment.get('interpretation', 'N/A')}"""
 
             whale_summary = ""
             if whale_flow:

@@ -340,3 +340,19 @@ news_collector = NewsFeedCollector()
 def get_recent_news(limit: int = 5) -> List[Dict[str, Any]]:
     """Convenience function to get recent news."""
     return news_collector.get_recent_news(limit)
+
+
+def get_news_for_analysis(limit: int = 30) -> List[Dict[str, Any]]:
+    """
+    Get news items for advanced analysis.
+
+    This returns more items without limit filtering,
+    intended for the advanced news analyzer to process.
+
+    Args:
+        limit: Maximum number of items
+
+    Returns:
+        List of raw news items for analysis
+    """
+    return news_collector.get_recent_news(limit)

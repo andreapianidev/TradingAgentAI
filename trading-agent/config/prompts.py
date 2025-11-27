@@ -1,7 +1,86 @@
 """
 System prompts and templates for the LLM decision maker.
 """
+from typing import Dict, Any, List
 from config.settings import settings
+
+
+def _build_news_section(news_data: dict, symbol: str) -> str:
+    """
+    Build advanced news section for LLM prompt from analyzed news data.
+
+    Args:
+        news_data: Analyzed news data from news_analyzer
+        symbol: Trading symbol to focus on
+
+    Returns:
+        Formatted news section string
+    """
+    if not news_data:
+        return "Nessuna news recente analizzata"
+
+    # Extract key data
+    aggregated = news_data.get("aggregated_sentiment", {})
+    symbol_sentiment = news_data.get("symbol_sentiment", {})
+    total_analyzed = news_data.get("total_analyzed", 0)
+    high_impact_count = news_data.get("high_impact_count", 0)
+    articles = news_data.get("articles", [])
+
+    if total_analyzed == 0:
+        return "Nessuna news recente analizzata"
+
+    # Build sentiment summary
+    sections = []
+
+    # Aggregated sentiment
+    agg_label = aggregated.get("label", "neutral").upper()
+    agg_score = aggregated.get("score", 0)
+    agg_confidence = aggregated.get("confidence", 0)
+    agg_interpretation = aggregated.get("interpretation", "N/A")
+
+    sections.append(f"""SENTIMENT NEWS AGGREGATO (basato su {total_analyzed} articoli AI-analizzati):
+  - Sentiment: {agg_label} (score: {agg_score:.2f}, confidenza: {agg_confidence:.0%})
+  - Interpretazione: {agg_interpretation}
+  - News ad alto impatto: {high_impact_count}""")
+
+    # Symbol-specific sentiment
+    if isinstance(symbol_sentiment, dict) and symbol_sentiment:
+        sym_label = symbol_sentiment.get("label", "neutral").upper()
+        sym_score = symbol_sentiment.get("score", 0)
+        sym_count = symbol_sentiment.get("article_count", 0)
+        sections.append(f"""
+  SENTIMENT SPECIFICO {symbol}:
+  - Sentiment: {sym_label} (score: {sym_score:.2f})
+  - Articoli rilevanti per {symbol}: {sym_count}""")
+
+    # Top articles with AI summaries
+    if articles:
+        sections.append("\n  TOP NEWS ANALIZZATE:")
+        for i, article in enumerate(articles[:7], 1):  # Show top 7
+            sentiment_icon = {
+                "very_bullish": "[++]",
+                "bullish": "[+]",
+                "neutral": "[~]",
+                "bearish": "[-]",
+                "very_bearish": "[--]"
+            }.get(article.get("sentiment", "neutral"), "[~]")
+
+            impact = article.get("impact", "low").upper()
+            title = article.get("title", "N/A")[:80]
+            summary = article.get("summary", "")[:120]
+            age = article.get("age_hours", 0)
+            source = article.get("source", "Unknown")
+            key_points = article.get("key_points", [])
+
+            sections.append(f"""
+  {i}. {sentiment_icon} [{impact}] {title}
+     Fonte: {source} | Età: {age:.1f}h | Score: {article.get('sentiment_score', 0):.2f}
+     Riassunto AI: {summary}""")
+
+            if key_points:
+                sections.append(f"     Key point: {key_points[0][:80]}")
+
+    return "\n".join(sections)
 
 
 def get_system_prompt() -> str:
@@ -59,7 +138,9 @@ CONDIZIONI DI CHIUSURA POSIZIONI:
 - Inversione segnali tecnici (es. long aperta ma MACD diventa negativo + RSI >75)
 - Forecast cambia drasticamente direzione
 - Sentiment passa da GREED a EXTREME FEAR o viceversa
-- News molto negative per la crypto in posizione
+- NEWS AI-ANALYZED: sentiment very_bearish con HIGH impact per posizioni long
+- NEWS AI-ANALYZED: sentiment very_bullish con HIGH impact per posizioni short
+- Sentiment news specifico per il symbol diventa fortemente opposto alla posizione
 
 CONDIZIONI PER HOLD:
 - Nessun segnale forte in nessuna direzione
@@ -72,14 +153,25 @@ PESI DI IMPORTANZA INDICATORI (usa questi per valutare):
 - Pivot Points: 0.8 (molto importante per S/R)
 - MACD: 0.7 (importante per momentum)
 - RSI: 0.7 (importante per overbought/oversold)
+- Whale Flow: 0.65 (importante - outflow da exchange = accumulo bullish, inflow = distribuzione bearish)
 - Forecast Prophet: 0.6 (importante per trend)
-- Whale Flow: 0.6 (importante - outflow da exchange = accumulo bullish, inflow = distribuzione bearish)
+- NEWS AI-ANALYZED: 0.55 (IMPORTANTE - le news sono state analizzate con AI, considera sentiment aggregato e impatto)
 - CoinGecko Data: 0.5 (importante per contesto mercato globale e trending)
 - BTC Dominance: 0.5 (alto = risk-off/hold BTC, basso = altcoin opportunità)
 - Order Book: 0.5 (moderatamente importante)
 - Trending Coins: 0.4 (se la nostra coin è trending = maggiore interesse)
-- Sentiment: 0.4 (contesto generale)
-- News: 0.3 (peso basso, mercato crypto meno reattivo alle news)
+- Fear & Greed Index: 0.4 (contesto generale del mercato)
+
+NOTA IMPORTANTE SULLE NEWS:
+Le news sono state analizzate con DeepSeek AI, che ha:
+- Fatto scraping completo degli articoli (non solo titoli)
+- Calcolato sentiment preciso per ogni articolo
+- Identificato news ad alto impatto
+- Filtrato news vecchie (solo ultime 4 ore)
+Considera SERIAMENTE il sentiment news aggregato, specialmente se:
+- Ci sono news ad alto impatto (HIGH)
+- Il sentiment è very_bullish o very_bearish con alta confidenza
+- Il sentiment specifico per il symbol è fortemente direzionale
 
 GESTIONE DINAMICA STOP LOSS E TAKE PROFIT:
 
@@ -189,7 +281,7 @@ def build_user_prompt(
     forecast: dict,
     orderbook: dict,
     sentiment: dict,
-    news: list,
+    news_data: dict,
     open_positions: list,
     whale_flow: dict = None,
     coingecko: dict = None
@@ -205,8 +297,8 @@ def build_user_prompt(
         pivot_points: Pivot point levels
         forecast: Prophet forecast data
         orderbook: Order book data
-        sentiment: Market sentiment
-        news: Recent news items
+        sentiment: Market sentiment (Fear & Greed Index)
+        news_data: Advanced news analysis data with AI-powered sentiment
         open_positions: Currently open positions
         whale_flow: Whale capital flow analysis
         coingecko: CoinGecko market data (global, trending, coins)
@@ -222,12 +314,8 @@ def build_user_prompt(
             for p in open_positions
         ])
 
-    news_str = "Nessuna news recente"
-    if news:
-        news_str = "\n".join([
-            f"  - [{n.get('sentiment', 'neutral')}] {n['title'][:100]}"
-            for n in news[:5]
-        ])
+    # Build advanced news section from analyzed data
+    news_str = _build_news_section(news_data, symbol)
 
     # Default whale_flow if None
     if whale_flow is None:
