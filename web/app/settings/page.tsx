@@ -22,7 +22,9 @@ import {
   DollarSign,
   Percent,
   BarChart3,
-  Power
+  Power,
+  Trash2,
+  Eye
 } from 'lucide-react'
 
 interface SettingsGroup {
@@ -63,16 +65,58 @@ export default function SettingsPage() {
     trading: true,
     risk: true
   })
+  const [cleanupLoading, setCleanupLoading] = useState(false)
+  const [cleanupResults, setCleanupResults] = useState<any>(null)
+  const [dbStats, setDbStats] = useState<any>(null)
 
   useEffect(() => {
     setMounted(true)
     fetchSettings()
     fetchBotStatus()
+    fetchDbStats()
 
     // Auto-refresh bot status every 30 seconds
     const interval = setInterval(fetchBotStatus, 30000)
     return () => clearInterval(interval)
   }, [])
+
+  const fetchDbStats = async () => {
+    try {
+      const res = await fetch('/api/database/cleanup')
+      const data = await res.json()
+      if (data.success) {
+        setDbStats(data)
+      }
+    } catch (error) {
+      console.error('Error fetching DB stats:', error)
+    }
+  }
+
+  const runCleanup = async (dryRun: boolean = false) => {
+    setCleanupLoading(true)
+    setCleanupResults(null)
+    try {
+      const res = await fetch('/api/database/cleanup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun })
+      })
+      const data = await res.json()
+      setCleanupResults(data)
+      if (!dryRun && data.success) {
+        // Refresh stats after cleanup
+        setTimeout(fetchDbStats, 1000)
+      }
+    } catch (error) {
+      console.error('Cleanup error:', error)
+      setCleanupResults({
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to run cleanup'
+      })
+    } finally {
+      setCleanupLoading(false)
+    }
+  }
 
   const fetchBotStatus = async () => {
     try {
@@ -596,11 +640,130 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Database Info */}
+      {/* Database Cleanup */}
       <div className={cn(
         "card settings-card",
         mounted && "animate-fade-in-up"
       )} style={{ animationDelay: '0.6s' }}>
+        <div className="card-header">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-red-500/10">
+                <Trash2 className="w-5 h-5 text-red-500 category-icon" />
+              </div>
+              <div>
+                <h2 className="card-title">Database Cleanup</h2>
+                <p className="text-sm text-gray-500 font-normal">Clean old logs and free up storage</p>
+              </div>
+            </div>
+            <button
+              onClick={fetchDbStats}
+              className="btn btn-secondary flex items-center gap-2 text-sm"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Refresh Stats
+            </button>
+          </div>
+        </div>
+
+        {/* Database Stats */}
+        {dbStats && (
+          <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+            {dbStats.stats.map((stat: any) => (
+              <div key={stat.table} className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-3">
+                <div className="text-xs text-gray-500 mb-1">{stat.table.replace('trading_', '')}</div>
+                <div className="text-lg font-bold text-gray-900 dark:text-white">
+                  {stat.records.toLocaleString()}
+                </div>
+                <div className="text-xs text-gray-400">records</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Retention Policy Info */}
+        <div className="mt-4 bg-blue-50 dark:bg-blue-500/5 border border-blue-200 dark:border-blue-500/20 rounded-lg p-4">
+          <h4 className="text-sm font-medium text-blue-700 dark:text-blue-400 mb-2">Retention Policy</h4>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-blue-600 dark:text-blue-300">
+            <div>• Bot Logs: <strong>7 days</strong></div>
+            <div>• Market Data: <strong>30 days</strong></div>
+            <div>• News: <strong>30 days</strong></div>
+            <div>• Trading History: <strong>Forever</strong></div>
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="mt-4 flex flex-col sm:flex-row gap-3">
+          <button
+            onClick={() => runCleanup(true)}
+            disabled={cleanupLoading}
+            className="btn btn-secondary flex items-center justify-center gap-2"
+          >
+            <Eye className={cn("w-4 h-4", cleanupLoading && "animate-pulse")} />
+            {cleanupLoading ? 'Checking...' : 'Preview Cleanup'}
+          </button>
+          <button
+            onClick={() => runCleanup(false)}
+            disabled={cleanupLoading}
+            className="btn bg-red-600 hover:bg-red-700 text-white flex items-center justify-center gap-2"
+          >
+            <Trash2 className={cn("w-4 h-4", cleanupLoading && "animate-pulse")} />
+            {cleanupLoading ? 'Cleaning...' : 'Run Cleanup'}
+          </button>
+        </div>
+
+        {/* Cleanup Results */}
+        {cleanupResults && (
+          <div className={cn(
+            "mt-4 p-4 rounded-lg border",
+            cleanupResults.success
+              ? "bg-green-50 dark:bg-green-500/5 border-green-200 dark:border-green-500/20"
+              : "bg-red-50 dark:bg-red-500/5 border-red-200 dark:border-red-500/20"
+          )}>
+            <div className="flex items-center gap-2 mb-3">
+              {cleanupResults.success ? (
+                <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
+              ) : (
+                <XCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
+              )}
+              <h4 className={cn(
+                "font-medium",
+                cleanupResults.success
+                  ? "text-green-700 dark:text-green-400"
+                  : "text-red-700 dark:text-red-400"
+              )}>
+                {cleanupResults.message}
+              </h4>
+            </div>
+
+            {cleanupResults.results && (
+              <div className="space-y-2">
+                {cleanupResults.results.map((result: any) => (
+                  <div key={result.table} className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600 dark:text-gray-300">
+                      {result.table}
+                    </span>
+                    <span className={cn(
+                      "font-medium",
+                      result.deleted > 0
+                        ? "text-green-600 dark:text-green-400"
+                        : "text-gray-500"
+                    )}>
+                      {result.deleted > 0 ? `${result.deleted.toLocaleString()} deleted` : 'No old records'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Database Info */}
+      <div className={cn(
+        "card settings-card",
+        mounted && "animate-fade-in-up"
+      )} style={{ animationDelay: '0.7s' }}>
         <div className="card-header">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-gray-500/10">
@@ -642,7 +805,7 @@ export default function SettingsPage() {
       <div className={cn(
         "bg-gradient-to-r from-green-500/5 to-blue-500/5 border border-green-500/10 rounded-lg p-4",
         mounted && "animate-fade-in-up"
-      )} style={{ animationDelay: '0.7s' }}>
+      )} style={{ animationDelay: '0.8s' }}>
         <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-2 flex items-center gap-2">
           <Info className="w-4 h-4 text-green-500" />
           Quick Tips
