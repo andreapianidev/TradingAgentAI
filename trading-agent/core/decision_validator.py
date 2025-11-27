@@ -131,18 +131,35 @@ class DecisionValidator:
         if size != sanitized["position_size_pct"]:
             logger.info(f"Clamped position size from {size}% to {sanitized['position_size_pct']}%")
 
-        # Validate stop loss (dynamic: 1-10%)
-        stop_loss = decision.get("stop_loss_pct", settings.STOP_LOSS_PCT)
-        sanitized["stop_loss_pct"] = max(1.0, min(10.0, float(stop_loss)))
+        # Validate stop loss (dynamic: 1-10%) with safe float conversion
+        try:
+            stop_loss_raw = decision.get("stop_loss_pct", settings.STOP_LOSS_PCT)
+            stop_loss = float(stop_loss_raw) if stop_loss_raw is not None else settings.STOP_LOSS_PCT
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid stop_loss_pct value: {decision.get('stop_loss_pct')}, using default")
+            stop_loss = settings.STOP_LOSS_PCT
+        sanitized["stop_loss_pct"] = max(1.0, min(10.0, stop_loss))
 
-        # Validate take profit (dynamic: 2-20%)
-        take_profit = decision.get("take_profit_pct", settings.TAKE_PROFIT_PCT)
-        sanitized["take_profit_pct"] = max(2.0, min(20.0, float(take_profit)))
+        # Validate take profit (dynamic: 2-20%) with safe float conversion
+        try:
+            take_profit_raw = decision.get("take_profit_pct", settings.TAKE_PROFIT_PCT)
+            take_profit = float(take_profit_raw) if take_profit_raw is not None else settings.TAKE_PROFIT_PCT
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid take_profit_pct value: {decision.get('take_profit_pct')}, using default")
+            take_profit = settings.TAKE_PROFIT_PCT
+        sanitized["take_profit_pct"] = max(2.0, min(20.0, take_profit))
 
         # Validate Risk/Reward ratio (minimum 1.5:1)
         sl = sanitized["stop_loss_pct"]
         tp = sanitized["take_profit_pct"]
-        rr_ratio = tp / sl if sl > 0 else 0
+
+        # Safety check: SL must be > 0 to avoid division by zero
+        if sl <= 0:
+            logger.warning(f"Invalid SL ({sl}%), forcing to minimum 1%")
+            sl = 1.0
+            sanitized["stop_loss_pct"] = sl
+
+        rr_ratio = tp / sl
 
         if rr_ratio < 1.5:
             # Adjust TP to meet minimum R:R of 1.5:1

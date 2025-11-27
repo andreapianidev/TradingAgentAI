@@ -74,6 +74,13 @@ export default function CostsPage() {
   const [isVisible, setIsVisible] = useState(false)
   const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
+  // Safe number conversion to avoid NaN
+  const safeNumber = (value: unknown): number => {
+    if (value === null || value === undefined) return 0
+    const num = Number(value)
+    return isNaN(num) ? 0 : num
+  }
+
   const fetchData = useCallback(async () => {
     setRefreshing(true)
     try {
@@ -83,11 +90,16 @@ export default function CostsPage() {
       startDate.setDate(startDate.getDate() - days)
 
       // Fetch all costs for the period
-      const { data: costs } = await supabase
+      const { data: costs, error: costsError } = await supabase
         .from('trading_costs')
         .select('*')
         .gte('created_at', startDate.toISOString())
         .order('created_at', { ascending: false })
+
+      if (costsError) {
+        console.error('Error fetching costs:', costsError)
+        throw costsError
+      }
 
       // Fetch related decisions for enrichment
       const decisionIds = costs?.filter(c => c.decision_id).map(c => c.decision_id) || []
@@ -124,16 +136,16 @@ export default function CostsPage() {
         const savingsFromCache = cachedTokens * (DEEPSEEK_PRICING.input - DEEPSEEK_PRICING.cached)
 
         setTotals({
-          total: costs.reduce((sum: number, c: TradingCost) => sum + Number(c.cost_usd), 0),
-          llm: llmCosts.reduce((sum: number, c: TradingCost) => sum + Number(c.cost_usd), 0),
-          fees: feeCosts.reduce((sum: number, c: TradingCost) => sum + Number(c.cost_usd), 0),
+          total: costs.reduce((sum: number, c: TradingCost) => sum + safeNumber(c.cost_usd), 0),
+          llm: llmCosts.reduce((sum: number, c: TradingCost) => sum + safeNumber(c.cost_usd), 0),
+          fees: feeCosts.reduce((sum: number, c: TradingCost) => sum + safeNumber(c.cost_usd), 0),
           llmCalls: llmCosts.length,
-          inputTokens: llmCosts.reduce((sum: number, c: TradingCost) => sum + (c.input_tokens || 0), 0),
-          outputTokens: llmCosts.reduce((sum: number, c: TradingCost) => sum + (c.output_tokens || 0), 0),
+          inputTokens: llmCosts.reduce((sum: number, c: TradingCost) => sum + safeNumber(c.input_tokens), 0),
+          outputTokens: llmCosts.reduce((sum: number, c: TradingCost) => sum + safeNumber(c.output_tokens), 0),
           cachedTokens: cachedTokens,
           trades: feeCosts.length,
           avgCostPerTrade: feeCosts.length > 0
-            ? feeCosts.reduce((sum: number, c: TradingCost) => sum + Number(c.cost_usd), 0) / feeCosts.length
+            ? feeCosts.reduce((sum: number, c: TradingCost) => sum + safeNumber(c.cost_usd), 0) / feeCosts.length
             : 0,
           savingsFromCache
         })
@@ -141,14 +153,14 @@ export default function CostsPage() {
         // Group by day for chart
         const costsByDay: Record<string, { llm: number; fees: number }> = {}
         costs.forEach((c: TradingCost) => {
-          const date = c.created_at.split('T')[0]
+          const date = c.created_at?.split('T')[0] || 'unknown'
           if (!costsByDay[date]) {
             costsByDay[date] = { llm: 0, fees: 0 }
           }
           if (c.cost_type === 'llm') {
-            costsByDay[date].llm += Number(c.cost_usd)
+            costsByDay[date].llm += safeNumber(c.cost_usd)
           } else {
-            costsByDay[date].fees += Number(c.cost_usd)
+            costsByDay[date].fees += safeNumber(c.cost_usd)
           }
         })
 
@@ -166,9 +178,9 @@ export default function CostsPage() {
             bySymbol[sym] = { llm: 0, fees: 0, count: 0 }
           }
           if (c.cost_type === 'llm') {
-            bySymbol[sym].llm += Number(c.cost_usd)
+            bySymbol[sym].llm += safeNumber(c.cost_usd)
           } else {
-            bySymbol[sym].fees += Number(c.cost_usd)
+            bySymbol[sym].fees += safeNumber(c.cost_usd)
           }
           bySymbol[sym].count++
         })

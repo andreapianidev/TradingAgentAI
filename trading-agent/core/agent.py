@@ -389,24 +389,40 @@ class TradingAgent:
         action = decision.get("action", ACTION_HOLD)
         confidence = decision.get("confidence", 0)
 
-        # Log detailed LLM decision
+        # Log detailed LLM decision with safe value handling
         logger.info("=" * 50)
         logger.info("LLM DECISION:")
-        logger.info(f"  Action: {action.upper()}")
-        if action != ACTION_HOLD:
-            logger.info(f"  Direction: {decision.get('direction', 'N/A').upper()}")
-            logger.info(f"  Position Size: {decision.get('position_size_pct', 0)}%")
-            logger.info(f"  Leverage: {decision.get('leverage', 1)}x")
-            sl_pct = decision.get('stop_loss_pct', 0)
-            tp_pct = decision.get('take_profit_pct', 0)
-            rr_ratio = tp_pct / sl_pct if sl_pct > 0 else 0
+        logger.info(f"  Action: {action.upper() if action else 'N/A'}")
+        if action and action != ACTION_HOLD:
+            direction = decision.get('direction')
+            logger.info(f"  Direction: {direction.upper() if direction else 'N/A'}")
+            logger.info(f"  Position Size: {decision.get('position_size_pct', 0) or 0}%")
+            logger.info(f"  Leverage: {decision.get('leverage', 1) or 1}x")
+
+            # Safe numeric handling for TP/SL
+            sl_pct = decision.get('stop_loss_pct') or 0
+            tp_pct = decision.get('take_profit_pct') or 0
+            try:
+                sl_pct = float(sl_pct)
+                tp_pct = float(tp_pct)
+                rr_ratio = tp_pct / sl_pct if sl_pct > 0 else 0
+            except (TypeError, ValueError):
+                sl_pct, tp_pct, rr_ratio = 0, 0, 0
+
             logger.info(f"  Stop Loss: {sl_pct}% (DYNAMIC)")
             logger.info(f"  Take Profit: {tp_pct}% (DYNAMIC)")
             logger.info(f"  Risk/Reward: {rr_ratio:.2f}:1")
-            if decision.get('tp_sl_reasoning'):
-                logger.info(f"  TP/SL Reasoning: {decision.get('tp_sl_reasoning')}")
+
+            tp_sl_reasoning = decision.get('tp_sl_reasoning')
+            if tp_sl_reasoning:
+                logger.info(f"  TP/SL Reasoning: {tp_sl_reasoning}")
+
         logger.info(f"  Confidence: {confidence:.2%}")
-        logger.info(f"  Reasoning: {decision.get('reasoning', 'N/A')}")
+        reasoning = decision.get('reasoning', 'N/A')
+        # Truncate very long reasoning for log readability
+        if reasoning and len(str(reasoning)) > 500:
+            reasoning = str(reasoning)[:500] + "..."
+        logger.info(f"  Reasoning: {reasoning}")
         logger.info("=" * 50)
 
         # 9. Validate decision
