@@ -32,6 +32,7 @@ from config.constants import (
 )
 from utils.logger import get_logger
 from utils.rate_limiter import deepseek_rate_limiter
+from core.cost_tracker import calculate_llm_cost
 
 logger = get_logger(__name__)
 
@@ -214,9 +215,37 @@ class DeepSeekNewsClient:
                 data = response.json()
                 content_text = data["choices"][0]["message"]["content"].strip()
 
+                # Extract token usage for cost tracking
+                usage = data.get("usage", {})
+                input_tokens = usage.get("prompt_tokens", 0)
+                output_tokens = usage.get("completion_tokens", 0)
+                cached_tokens = usage.get("prompt_cache_hit_tokens", 0)
+                cost_usd = calculate_llm_cost(input_tokens, output_tokens, cached_tokens)
+
+                # Save cost to database (lazy import to avoid circular dependency)
+                if cost_usd > 0:
+                    try:
+                        from database.operations import db_ops
+                        db_ops.save_llm_cost(
+                            symbol="NEWS",  # Generic symbol for news analysis
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                            cost_usd=cost_usd,
+                            cached_tokens=cached_tokens,
+                            model=self.model,
+                            details={"provider": "deepseek", "type": "news_analysis", "title": title[:100]}
+                        )
+                        logger.debug(f"News analysis cost: ${cost_usd:.6f} ({input_tokens}+{output_tokens} tokens)")
+                    except Exception as e:
+                        logger.warning(f"Failed to save news analysis cost: {e}")
+
                 # Use robust JSON parsing
                 analysis = self._parse_deepseek_response(content_text)
                 if analysis:
+                    # Add cost metadata to analysis result
+                    analysis["_cost_usd"] = cost_usd
+                    analysis["_input_tokens"] = input_tokens
+                    analysis["_output_tokens"] = output_tokens
                     return analysis
 
                 # If parsing failed but no exception, don't retry
