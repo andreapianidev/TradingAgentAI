@@ -269,6 +269,23 @@ class DeepSeekClient:
                     logger.warning("Open action requires valid direction")
                     return None
 
+                # Validate TP/SL fields for open action
+                if not decision.get("stop_loss_pct"):
+                    logger.warning("Open action requires stop_loss_pct")
+                    return None
+
+                if not decision.get("take_profit_pct"):
+                    logger.warning("Open action requires take_profit_pct")
+                    return None
+
+                # Validate tp_sl_reasoning (required for tracking and audit)
+                if not decision.get("tp_sl_reasoning"):
+                    logger.warning(
+                        "Open action requires tp_sl_reasoning - "
+                        "LLM must explain why these TP/SL values were chosen"
+                    )
+                    return None
+
             return decision
 
         except json.JSONDecodeError as e:

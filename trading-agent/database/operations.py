@@ -238,6 +238,61 @@ class DatabaseOperations:
         """Sync positions from Alpaca to database."""
         return supabase_ops.sync_positions_from_alpaca(alpaca_positions)
 
+    # ============== Cost Tracking ==============
+
+    def save_llm_cost(
+        self,
+        symbol: str,
+        input_tokens: int,
+        output_tokens: int,
+        cost_usd: float,
+        cached_tokens: int = 0,
+        model: str = None,
+        decision_id: str = None,
+        details: Dict[str, Any] = None
+    ) -> str:
+        """Save LLM API cost record."""
+        return supabase_ops.save_llm_cost(
+            symbol=symbol,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost_usd,
+            cached_tokens=cached_tokens,
+            model=model,
+            decision_id=decision_id,
+            details=details
+        )
+
+    def save_trading_fee(
+        self,
+        symbol: str,
+        trade_value_usd: float,
+        fee_usd: float,
+        fee_type: str = "taker",
+        position_id: str = None,
+        estimated_fee_usd: float = None
+    ) -> str:
+        """Save trading fee record."""
+        return supabase_ops.save_trading_fee(
+            symbol=symbol,
+            trade_value_usd=trade_value_usd,
+            fee_usd=fee_usd,
+            fee_type=fee_type,
+            position_id=position_id,
+            estimated_fee_usd=estimated_fee_usd
+        )
+
+    def get_cost_totals(
+        self,
+        start_date: datetime,
+        end_date: datetime = None
+    ) -> Dict[str, Any]:
+        """Get aggregated cost totals for a date range."""
+        return supabase_ops.get_cost_totals(
+            start_date=start_date,
+            end_date=end_date
+        )
+
 
 # Global operations instance
 db_ops = DatabaseOperations()

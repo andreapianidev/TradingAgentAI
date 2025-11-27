@@ -181,14 +181,16 @@ NON usare valori fissi! Analizza il contesto e decidi valori appropriati.
 LIMITI ASSOLUTI:
 - Stop Loss: minimo 1%, massimo 10%
 - Take Profit: minimo 2%, massimo 20%
-- Risk/Reward MINIMO: 1.5:1 (es. SL 3% richiede TP almeno 4.5%)
+- Risk/Reward MINIMO: 1.5:1 NETTO (dopo fee Alpaca 0.30% round-trip)
+  Esempio: SL 3% richiede TP almeno 4.8% (4.5% + 0.30% fee = 4.8% per R:R netto 1.5:1)
 
 CRITERI PER SCEGLIERE STOP LOSS:
 
-1. VOLATILITÀ (guarda il range delle candele e MACD histogram):
-   - Bassa volatilità (MACD histogram < 50, range giornaliero < 2%): SL stretto 2-3%
-   - Media volatilità (range 2-4%): SL medio 3-5%
-   - Alta volatilità (range > 4%): SL largo 5-7% (per evitare stop out su rumore)
+1. VOLATILITÀ (usa le metriche ATR fornite nei dati):
+   - Bassa volatilità (ATR% < 2%, volatility_regime = "low"): SL stretto 2-3%
+   - Media volatilità (ATR% 2-4%, volatility_regime = "medium"): SL medio 3-5%
+   - Alta volatilità (ATR% > 4%, volatility_regime = "high"): SL largo 5-7% (per evitare stop out su rumore)
+   - IMPORTANTE: usa suggested_sl_range come riferimento base
 
 2. DISTANZA DAI PIVOT POINTS:
    - Se LONG vicino a S1: SL appena sotto S1 (calcola la % dalla entry)
@@ -381,6 +383,15 @@ NOTA: Operiamo su Alpaca (spot trading, NO leva). Leverage sempre = 1.
 - EMA2: ${indicators.get('ema2', 0):.2f}
 - EMA20: ${indicators.get('ema20', 0):.2f}
 - Volume SMA: {indicators.get('volume_sma', 0):,.0f}
+
+📊 VOLATILITÀ (per TP/SL dinamico):
+- ATR (14 periodi): ${indicators.get('atr_14', 0) or 0:.2f}
+- ATR %: {indicators.get('atr_pct', 0) or 0:.2f}% (< 2% = bassa, 2-4% = media, > 4% = alta)
+- Range giornaliero: {indicators.get('daily_range_pct', 0) or 0:.2f}%
+- Range medio (14 candele): {indicators.get('avg_range_pct', 0) or 0:.2f}%
+- Regime volatilità: {indicators.get('volatility_regime', 'unknown').upper()}
+- SL suggerito: {indicators.get('suggested_sl_range', '3-5%')}
+- TP suggerito: {indicators.get('suggested_tp_range', '5-8%')}
 
 🎯 PIVOT POINTS:
 - PP (Pivot Point): ${pivot_points.get('pp', 0):.2f}

@@ -18,12 +18,14 @@ import EquityChart from '@/components/EquityChart'
 import RecentTrades from '@/components/RecentTrades'
 import OpenPositions from '@/components/OpenPositions'
 import AlertsPanel from '@/components/AlertsPanel'
+import CostSummaryCard from '@/components/CostSummaryCard'
 
 const SYNC_INTERVAL = 30000 // 30 seconds
 
 interface DashboardStats {
   totalEquity: number
   availableBalance: number
+  marginUsed: number
   totalPnl: number
   totalPnlPct: number
   dailyPnl: number
@@ -91,6 +93,7 @@ export default function Dashboard() {
         setStats({
           totalEquity: parseFloat(snapshot.total_equity_usdc) || 10000,
           availableBalance: parseFloat(snapshot.available_balance_usdc) || 10000,
+          marginUsed: parseFloat(snapshot.margin_used_usdc) || 0,
           totalPnl: parseFloat(snapshot.total_pnl) || 0,
           totalPnlPct: parseFloat(snapshot.total_pnl_pct) || 0,
           dailyPnl: parseFloat(snapshot.daily_pnl) || 0,
@@ -198,6 +201,18 @@ export default function Dashboard() {
           <div className={cn('stat-change', stats ? getPnlColor(stats.totalPnlPct) : 'text-gray-500')}>
             {stats ? `${formatPercent(stats.totalPnlPct)} all time` : 'No data'}
           </div>
+          {stats && (
+            <div className="mt-2 pt-2 border-t border-gray-700/50 space-y-1">
+              <div className="flex justify-between text-xs">
+                <span className="text-gray-500">Cash</span>
+                <span className="text-gray-300">{formatCurrency(stats.availableBalance)}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-gray-500">Invested</span>
+                <span className="text-gray-300">{formatCurrency(stats.marginUsed)}</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Daily P&L */}
@@ -255,9 +270,10 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Alerts Panel */}
-        <div>
+        {/* Right Column: Alerts + Costs */}
+        <div className="space-y-6">
           <AlertsPanel alerts={alerts} />
+          <CostSummaryCard />
         </div>
       </div>
 

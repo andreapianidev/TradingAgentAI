@@ -407,10 +407,10 @@ class TestSymbolSentiment:
 
         result = news_analyzer._calculate_symbol_sentiments(articles)
 
-        # BTC: (0.8 + 0.6) / 2 = 0.7
+        # BTC: (0.8 + 0.6) / 2 = 0.7 -> very_bullish (score >= 0.5)
         assert 0.65 <= result["BTC"]["score"] <= 0.75
         assert result["BTC"]["article_count"] == 2
-        assert result["BTC"]["label"] == "bullish"
+        assert result["BTC"]["label"] == "very_bullish"
 
         # ETH: (0.6 + -0.4) / 2 = 0.1
         assert 0.05 <= result["ETH"]["score"] <= 0.15

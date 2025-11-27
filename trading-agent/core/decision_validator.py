@@ -12,6 +12,9 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Alpaca fee for R:R calculation (taker fee per trade)
+ALPACA_FEE_PCT = 0.15  # 0.15% per trade = 0.30% round-trip
+
 
 class DecisionValidator:
     """Validates and sanitizes LLM trading decisions."""
@@ -113,8 +116,14 @@ class DecisionValidator:
         return True, sanitized, "Valid open"
 
     def _sanitize_open(self, decision: Dict[str, Any]) -> Dict[str, Any]:
-        """Sanitize OPEN decision values."""
+        """Sanitize OPEN decision values with R:R validation and tracking."""
         sanitized = decision.copy()
+
+        # Initialize tracking fields
+        sanitized["tp_sl_adjusted"] = False
+        sanitized["tp_sl_adjustment_reason"] = None
+        sanitized["original_tp_pct"] = None
+        sanitized["original_sl_pct"] = None
 
         # Force leverage to 1 - Alpaca crypto does not support leverage
         # LLM may suggest leverage > 1, but we ignore it completely
@@ -149,7 +158,12 @@ class DecisionValidator:
             take_profit = settings.TAKE_PROFIT_PCT
         sanitized["take_profit_pct"] = max(2.0, min(20.0, take_profit))
 
-        # Validate Risk/Reward ratio (minimum 1.5:1)
+        # Store original values for tracking
+        original_sl = sanitized["stop_loss_pct"]
+        original_tp = sanitized["take_profit_pct"]
+        sanitized["original_sl_pct"] = original_sl
+        sanitized["original_tp_pct"] = original_tp
+
         sl = sanitized["stop_loss_pct"]
         tp = sanitized["take_profit_pct"]
 
@@ -159,21 +173,45 @@ class DecisionValidator:
             sl = 1.0
             sanitized["stop_loss_pct"] = sl
 
-        rr_ratio = tp / sl
+        # Apply confidence scaling to TP
+        confidence = decision.get("confidence", 0)
+        try:
+            confidence = float(confidence)
+        except (TypeError, ValueError):
+            confidence = 0.6
 
-        if rr_ratio < 1.5:
-            # Adjust TP to meet minimum R:R of 1.5:1
-            min_tp = sl * 1.5
+        tp = self._adjust_tp_by_confidence(tp, confidence)
+        sanitized["take_profit_pct"] = tp
+
+        # Calculate NET Risk/Reward ratio considering Alpaca fees
+        # Entry fee + Exit fee = 0.30% total
+        total_fees = ALPACA_FEE_PCT * 2
+        net_tp = tp - total_fees  # Net profit after fees
+        net_rr_ratio = net_tp / sl if sl > 0 else 0
+        gross_rr_ratio = tp / sl if sl > 0 else 0
+
+        # Minimum R:R of 1.5:1 AFTER fees
+        if net_rr_ratio < 1.5:
+            # Calculate minimum TP to achieve 1.5:1 net R:R
+            min_net_tp = sl * 1.5
+            min_gross_tp = min_net_tp + total_fees
             old_tp = tp
-            sanitized["take_profit_pct"] = max(2.0, min(20.0, min_tp))
-            logger.warning(
-                f"Risk/Reward ratio too low ({rr_ratio:.2f}:1). "
-                f"Adjusted TP from {old_tp}% to {sanitized['take_profit_pct']}% "
-                f"(new R:R = {sanitized['take_profit_pct']/sl:.2f}:1)"
+            new_tp = max(2.0, min(20.0, min_gross_tp))
+            sanitized["take_profit_pct"] = new_tp
+
+            # Track the adjustment
+            sanitized["tp_sl_adjusted"] = True
+            sanitized["tp_sl_adjustment_reason"] = (
+                f"R:R netto {net_rr_ratio:.2f}:1 < 1.5:1 minimo (fee {total_fees:.2f}%). "
+                f"TP modificato da {old_tp:.1f}% a {new_tp:.1f}% "
+                f"(nuovo R:R netto = {(new_tp - total_fees)/sl:.2f}:1)"
             )
+            logger.warning(sanitized["tp_sl_adjustment_reason"])
         else:
             logger.info(
-                f"Dynamic TP/SL: SL={sl}%, TP={tp}%, R:R={rr_ratio:.2f}:1"
+                f"Dynamic TP/SL: SL={sl}%, TP={tp}%, "
+                f"Gross R:R={gross_rr_ratio:.2f}:1, "
+                f"Net R:R={net_rr_ratio:.2f}:1 (after {total_fees:.2f}% fees)"
             )
 
         # Preserve tp_sl_reasoning if provided by LLM
@@ -181,10 +219,35 @@ class DecisionValidator:
             sanitized["tp_sl_reasoning"] = decision["tp_sl_reasoning"]
 
         # Validate confidence
-        confidence = decision.get("confidence", 0)
-        sanitized["confidence"] = max(0.0, min(1.0, float(confidence)))
+        sanitized["confidence"] = max(0.0, min(1.0, confidence))
 
         return sanitized
+
+    def _adjust_tp_by_confidence(self, tp_pct: float, confidence: float) -> float:
+        """
+        Scale Take Profit based on confidence level.
+
+        High confidence (>0.85): Allow more ambitious TP (+10%)
+        Low confidence (<0.65): More conservative TP (-10%)
+
+        Args:
+            tp_pct: Original take profit percentage
+            confidence: LLM confidence score (0-1)
+
+        Returns:
+            Adjusted take profit percentage
+        """
+        if confidence >= 0.85:
+            # High confidence: more ambitious TP
+            adjusted = tp_pct * 1.1
+            logger.info(f"High confidence ({confidence:.2f}): TP scaled up 10% ({tp_pct:.1f}% -> {adjusted:.1f}%)")
+            return min(20.0, adjusted)
+        elif confidence < 0.65:
+            # Low confidence: conservative TP
+            adjusted = tp_pct * 0.9
+            logger.info(f"Low confidence ({confidence:.2f}): TP scaled down 10% ({tp_pct:.1f}% -> {adjusted:.1f}%)")
+            return max(2.0, adjusted)
+        return tp_pct
 
     def _sanitize_hold(self, decision: Dict[str, Any]) -> Dict[str, Any]:
         """Sanitize HOLD decision."""

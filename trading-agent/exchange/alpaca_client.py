@@ -13,6 +13,10 @@ from utils.logger import get_logger, log_error_with_context
 
 logger = get_logger(__name__)
 
+# Constants for SL/TP retry logic
+MAX_SL_TP_RETRIES = 3
+SL_TP_RETRY_DELAY = 1  # seconds between retries
+
 # Alpaca symbol mappings for crypto
 ALPACA_CRYPTO_SYMBOLS = {
     "BTC": "BTC/USD",
@@ -624,14 +628,39 @@ class AlpacaClient:
             # Calculate SL/TP prices
             sl_price = None
             tp_price = None
+            sl_order_id = None
+            tp_order_id = None
 
             if stop_loss_pct and settings.ENABLE_STOP_LOSS:
                 sl_price = self._calculate_sl_price(entry_price, direction, stop_loss_pct)
-                self._set_stop_loss(symbol, direction, quantity, sl_price)
 
             if take_profit_pct and settings.ENABLE_TAKE_PROFIT:
                 tp_price = self._calculate_tp_price(entry_price, direction, take_profit_pct)
-                self._set_take_profit(symbol, direction, quantity, tp_price)
+
+            # Submit SL/TP orders with retry logic
+            if sl_price or tp_price:
+                sl_tp_result = self._submit_sl_tp_with_retry(
+                    symbol=symbol,
+                    direction=direction,
+                    quantity=quantity,
+                    sl_price=sl_price,
+                    tp_price=tp_price,
+                    stop_loss_pct=stop_loss_pct,
+                    take_profit_pct=take_profit_pct
+                )
+
+                if not sl_tp_result.get("success"):
+                    # SL failed after retries - position was closed for safety
+                    return {
+                        "success": False,
+                        "error": sl_tp_result.get("error", "SL/TP order failed"),
+                        "order_id": str(order.id),
+                        "entry_price": entry_price,
+                        "position_closed": True,
+                    }
+
+                sl_order_id = sl_tp_result.get("sl_order_id")
+                tp_order_id = sl_tp_result.get("tp_order_id")
 
             return {
                 "success": True,
@@ -642,6 +671,8 @@ class AlpacaClient:
                 "leverage": 1,  # No leverage for Alpaca crypto
                 "stop_loss_price": sl_price,
                 "take_profit_price": tp_price,
+                "sl_order_id": sl_order_id,
+                "tp_order_id": tp_order_id,
             }
 
         except Exception as e:
@@ -806,6 +837,206 @@ class AlpacaClient:
         except Exception as e:
             log_error_with_context(e, "_set_take_profit", {"symbol": symbol, "price": price})
             return None
+
+    def _submit_sl_tp_with_retry(
+        self,
+        symbol: str,
+        direction: str,
+        quantity: float,
+        sl_price: Optional[float],
+        tp_price: Optional[float],
+        stop_loss_pct: Optional[float] = None,
+        take_profit_pct: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """
+        Submit SL/TP orders with retry logic and safety fallback.
+
+        If SL fails after MAX_SL_TP_RETRIES, closes the position for safety.
+        If TP fails, logs warning but continues (position has SL protection).
+
+        Args:
+            symbol: Trading symbol
+            direction: Position direction ("long" or "short")
+            quantity: Position quantity
+            sl_price: Stop loss price
+            tp_price: Take profit price
+            stop_loss_pct: SL percentage (for logging)
+            take_profit_pct: TP percentage (for logging)
+
+        Returns:
+            Dict with success status and order IDs
+        """
+        sl_order_id = None
+        tp_order_id = None
+
+        # Retry logic for Stop Loss (CRITICAL - must succeed)
+        if sl_price:
+            for attempt in range(MAX_SL_TP_RETRIES):
+                try:
+                    sl_order_id = self._set_stop_loss(symbol, direction, quantity, sl_price)
+                    if sl_order_id:
+                        logger.info(
+                            f"SL order placed successfully (attempt {attempt + 1}): "
+                            f"{symbol} @ ${sl_price:.2f} ({stop_loss_pct}%)"
+                        )
+                        break
+                except Exception as e:
+                    logger.warning(
+                        f"SL attempt {attempt + 1}/{MAX_SL_TP_RETRIES} failed for {symbol}: {e}"
+                    )
+
+                if attempt < MAX_SL_TP_RETRIES - 1:
+                    time.sleep(SL_TP_RETRY_DELAY)
+
+            # If SL failed after all retries, this is CRITICAL
+            if not sl_order_id:
+                error_msg = (
+                    f"CRITICAL: Stop Loss order failed for {symbol} after "
+                    f"{MAX_SL_TP_RETRIES} retries. Closing position for safety."
+                )
+                logger.error(error_msg)
+
+                # Send critical alert
+                self._send_critical_alert(
+                    title="SL Order Failed - Position Closed",
+                    message=error_msg,
+                    symbol=symbol,
+                    details={
+                        "sl_price": sl_price,
+                        "stop_loss_pct": stop_loss_pct,
+                        "direction": direction,
+                        "quantity": quantity,
+                    }
+                )
+
+                # Close position for safety
+                try:
+                    self.close_position(symbol)
+                    logger.warning(f"Position {symbol} closed due to SL order failure")
+                except Exception as close_error:
+                    logger.error(f"Failed to close position after SL failure: {close_error}")
+
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "sl_order_id": None,
+                    "tp_order_id": None,
+                }
+
+        # Retry logic for Take Profit (less critical - SL provides protection)
+        if tp_price:
+            for attempt in range(MAX_SL_TP_RETRIES):
+                try:
+                    tp_order_id = self._set_take_profit(symbol, direction, quantity, tp_price)
+                    if tp_order_id:
+                        logger.info(
+                            f"TP order placed successfully (attempt {attempt + 1}): "
+                            f"{symbol} @ ${tp_price:.2f} ({take_profit_pct}%)"
+                        )
+                        break
+                except Exception as e:
+                    logger.warning(
+                        f"TP attempt {attempt + 1}/{MAX_SL_TP_RETRIES} failed for {symbol}: {e}"
+                    )
+
+                if attempt < MAX_SL_TP_RETRIES - 1:
+                    time.sleep(SL_TP_RETRY_DELAY)
+
+            # If TP failed, log warning but continue (position has SL protection)
+            if not tp_order_id:
+                warning_msg = (
+                    f"Take Profit order failed for {symbol} after {MAX_SL_TP_RETRIES} retries. "
+                    f"Position has SL protection only."
+                )
+                logger.warning(warning_msg)
+
+                # Send warning alert (not critical since SL is active)
+                self._send_alert(
+                    title="TP Order Failed - SL Active",
+                    message=warning_msg,
+                    symbol=symbol,
+                    severity="warning",
+                    details={
+                        "tp_price": tp_price,
+                        "take_profit_pct": take_profit_pct,
+                        "sl_price": sl_price,
+                        "sl_order_id": sl_order_id,
+                    }
+                )
+
+        return {
+            "success": True,
+            "sl_order_id": sl_order_id,
+            "tp_order_id": tp_order_id,
+        }
+
+    def _send_critical_alert(
+        self,
+        title: str,
+        message: str,
+        symbol: str = None,
+        details: Dict = None
+    ) -> None:
+        """
+        Send a critical alert for system failures.
+
+        Args:
+            title: Alert title
+            message: Alert message
+            symbol: Related symbol
+            details: Additional details
+        """
+        try:
+            # Try to save alert to database
+            from database.supabase_operations import save_trading_alert
+
+            save_trading_alert(
+                alert_type="error",
+                severity="critical",
+                title=title,
+                message=message,
+                symbol=symbol,
+                details=details or {}
+            )
+            logger.info(f"Critical alert saved: {title}")
+
+        except Exception as e:
+            # If database save fails, at least log it
+            logger.error(f"Failed to save critical alert: {e}")
+            logger.error(f"CRITICAL ALERT: {title} - {message}")
+
+    def _send_alert(
+        self,
+        title: str,
+        message: str,
+        symbol: str = None,
+        severity: str = "warning",
+        details: Dict = None
+    ) -> None:
+        """
+        Send a general alert.
+
+        Args:
+            title: Alert title
+            message: Alert message
+            symbol: Related symbol
+            severity: Alert severity (info, warning, critical)
+            details: Additional details
+        """
+        try:
+            from database.supabase_operations import save_trading_alert
+
+            save_trading_alert(
+                alert_type="error" if severity == "critical" else "signal_change",
+                severity=severity,
+                title=title,
+                message=message,
+                symbol=symbol,
+                details=details or {}
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to save alert: {e}")
 
     def _cancel_orders_for_symbol(self, symbol: str) -> None:
         """Cancel all open orders for a symbol."""

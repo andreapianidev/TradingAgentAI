@@ -69,6 +69,16 @@ export interface TradingDecision {
   entry_quantity?: number
   order_id?: string
   trading_mode: 'paper' | 'live'
+  // TP/SL tracking fields
+  tp_sl_reasoning?: string
+  tp_sl_adjusted?: boolean
+  tp_sl_adjustment_reason?: string
+  original_tp_pct?: number
+  original_sl_pct?: number
+  // Volatility context at decision time
+  volatility_regime?: 'low' | 'medium' | 'high' | 'unknown'
+  atr_at_decision?: number
+  daily_range_pct?: number
 }
 
 export interface TradingMarketContext {
@@ -241,4 +251,129 @@ export interface TradingAIAnalysis {
     sentiment_label: string
   }
   trading_mode: 'paper' | 'live'
+}
+
+export interface TradingCost {
+  id: string
+  created_at: string
+  cost_type: 'llm' | 'trading_fee'
+  llm_provider?: string
+  llm_model?: string
+  input_tokens?: number
+  output_tokens?: number
+  cached_tokens?: number
+  position_id?: string
+  fee_type?: string
+  trade_value_usd?: number
+  fee_rate?: number
+  cost_usd: number
+  symbol?: string
+  decision_id?: string
+  trading_mode: 'paper' | 'live'
+  details?: any
+}
+
+export interface TradingCostSummary {
+  id: string
+  created_at: string
+  period_type: 'daily' | 'monthly'
+  period_start: string
+  period_end: string
+  llm_total_cost_usd: number
+  llm_input_tokens: number
+  llm_output_tokens: number
+  llm_cached_tokens: number
+  llm_calls_count: number
+  trading_fees_total_usd: number
+  trades_count: number
+  total_cost_usd: number
+  cost_by_symbol?: Record<string, { llm: number; fees: number }>
+  trading_mode: 'paper' | 'live'
+}
+
+export interface TradingMarketGlobal {
+  id: string
+  created_at: string
+  timestamp: string
+  btc_dominance?: number
+  eth_dominance?: number
+  total_market_cap_usd?: number
+  total_volume_24h_usd?: number
+  market_cap_change_24h_pct?: number
+  active_cryptocurrencies?: number
+  trending_coins?: any
+  trending_symbols?: string[]
+  tracked_trending?: string[]
+}
+
+export interface TradingDailyStats {
+  id: string
+  created_at: string
+  date: string
+  total_trades: number
+  winning_trades: number
+  losing_trades: number
+  daily_pnl: number
+  daily_pnl_pct: number
+  total_volume_usdc: number
+  starting_equity?: number
+  ending_equity?: number
+  stats_by_symbol?: any
+  trading_mode: 'paper' | 'live'
+}
+
+export interface TradingDrawdownTracking {
+  id: string
+  created_at: string
+  date: string
+  starting_equity?: number
+  current_equity?: number
+  daily_pnl?: number
+  daily_drawdown_pct?: number
+  weekly_drawdown_pct?: number
+  trading_halted: boolean
+  halt_reason?: string
+  trading_mode: 'paper' | 'live'
+}
+
+export interface TradingForecastPerformance {
+  id: string
+  created_at: string
+  symbol: string
+  forecast_horizon: string
+  predicted_price?: number
+  actual_price?: number
+  prediction_timestamp?: string
+  evaluation_timestamp?: string
+  mape?: number
+  direction_correct?: boolean
+  hyperparameters?: any
+  trading_mode: 'paper' | 'live'
+}
+
+export interface TradingBotLog {
+  id: string
+  created_at: string
+  log_level: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL'
+  message: string
+  component?: string
+  symbol?: string
+  cycle_id?: string
+  details?: any
+  error_stack?: string
+  trading_mode: 'paper' | 'live'
+}
+
+export interface TradingTpSlAdjustment {
+  id: string
+  created_at: string
+  position_id?: string
+  decision_id?: string
+  adjustment_type: 'tp' | 'sl' | 'both'
+  old_value_pct?: number
+  new_value_pct?: number
+  old_price?: number
+  new_price?: number
+  reason: string
+  adjusted_by: 'system' | 'validator' | 'user' | 'trailing'
 }
