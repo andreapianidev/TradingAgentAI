@@ -215,6 +215,14 @@ class DatabaseOperations:
         """Get recent news events."""
         return supabase_ops.get_recent_news(symbol=symbol, limit=limit)
 
+    def save_news_batch(self, news_items: List[Dict[str, Any]]) -> int:
+        """Save multiple news items, avoiding duplicates by URL."""
+        return supabase_ops.save_news_batch(news_items)
+
+    def save_analyzed_news_batch(self, analyzed_items: List[Dict[str, Any]]) -> int:
+        """Save AI-analyzed news items with enhanced sentiment data."""
+        return supabase_ops.save_analyzed_news_batch(analyzed_items)
+
     # ============== Statistics ==============
 
     def get_trading_stats(self) -> Dict[str, Any]:

@@ -16,7 +16,8 @@ from indicators.forecasting import get_price_forecast
 
 from data.market_data import market_data_collector
 from data.sentiment import get_market_sentiment
-from data.news_feed import get_recent_news
+from data.news_feed import get_news_for_analysis
+from data.news_analyzer import news_analyzer, analyze_news, get_news_for_llm
 from data.whale_alert import get_whale_alerts, analyze_whale_flow
 from data.coingecko import get_market_summary as get_coingecko_data
 from data.cache_manager import cache_manager
@@ -120,7 +121,7 @@ class TradingAgent:
 
         # Get global sentiment, news, whale alerts, and CoinGecko data (shared across symbols)
         sentiment = self._get_sentiment_safe()
-        news = self._get_news_safe()
+        news_data = self._get_news_safe()  # Now returns Dict with analysis
         whale_alerts = self._get_whale_alerts_safe()
         whale_flow = self._analyze_whale_flow_safe()
         coingecko = self._get_coingecko_safe()
@@ -145,29 +146,65 @@ class TradingAgent:
         logger.info(f"  Fear & Greed Index: {sentiment.get('score', 'N/A')} ({sentiment.get('label', 'N/A')})")
         logger.info(f"  Interpretation: {sentiment.get('interpretation', 'N/A')}")
 
-        # Log news feed results with detailed breakdown
+        # Log advanced news analysis results
         logger.info("-" * 50)
-        logger.info(f"NEWS FEED ({len(news)} articles):")
-        if news:
-            # Sentiment breakdown
-            positive_count = sum(1 for n in news if n.get("sentiment") == "positive")
-            negative_count = sum(1 for n in news if n.get("sentiment") == "negative")
-            neutral_count = sum(1 for n in news if n.get("sentiment") == "neutral")
-            logger.info(f"  Sentiment breakdown: {positive_count} positive, {negative_count} negative, {neutral_count} neutral")
-            logger.info("")
+        news_analysis = news_data.get("analysis", {})
+        analyzed_articles = news_analysis.get("analyzed_articles", [])
+        aggregated_sentiment = news_data.get("aggregated_sentiment", {})
 
-            for i, article in enumerate(news[:5], 1):  # Show top 5
-                sentiment_emoji = {"positive": "[+]", "negative": "[-]", "neutral": "[~]"}.get(article.get("sentiment", "neutral"), "[~]")
-                source = article.get("source", "Unknown")
-                pub_date = article.get("published_at", "")[:16] if article.get("published_at") else "N/A"
-                title = article.get("title", "N/A")[:70]
-                logger.info(f"  {i}. {sentiment_emoji} {title}")
-                logger.info(f"     Source: {source} | Date: {pub_date}")
+        logger.info(f"ADVANCED NEWS ANALYSIS ({news_analysis.get('total_analyzed', 0)} articles analyzed):")
+        logger.info(f"  Fresh news: {news_analysis.get('fresh_count', 0)} | Stale filtered: {news_analysis.get('stale_filtered', 0)}")
+        logger.info(f"  Analysis time: {news_analysis.get('analysis_time_seconds', 0):.1f}s")
+        logger.info("")
+
+        # Aggregated sentiment
+        logger.info(f"  AGGREGATED SENTIMENT:")
+        logger.info(f"    Score: {aggregated_sentiment.get('score', 0):.3f} | Label: {aggregated_sentiment.get('label', 'neutral').upper()}")
+        logger.info(f"    Confidence: {aggregated_sentiment.get('confidence', 0):.0%}")
+        logger.info(f"    Interpretation: {aggregated_sentiment.get('interpretation', 'N/A')}")
+
+        # Breakdown
+        breakdown = aggregated_sentiment.get("breakdown", {})
+        if breakdown:
+            logger.info(f"    Breakdown: {breakdown.get('very_bullish', 0)} very_bullish, {breakdown.get('bullish', 0)} bullish, "
+                       f"{breakdown.get('neutral', 0)} neutral, {breakdown.get('bearish', 0)} bearish, {breakdown.get('very_bearish', 0)} very_bearish")
+
+        # Per-symbol sentiment
+        symbol_sentiments = news_data.get("symbol_sentiments", {})
+        if symbol_sentiments:
+            logger.info("")
+            logger.info(f"  PER-SYMBOL SENTIMENT:")
+            for sym, data in symbol_sentiments.items():
+                logger.info(f"    {sym}: {data.get('label', 'neutral')} (score: {data.get('score', 0):.2f}, articles: {data.get('article_count', 0)})")
+
+        # High impact news
+        high_impact = news_data.get("high_impact_news", [])
+        if high_impact:
+            logger.info("")
+            logger.info(f"  HIGH IMPACT NEWS ({len(high_impact)}):")
+            for article in high_impact[:3]:
+                sentiment_emoji = {"very_bullish": "[++]", "bullish": "[+]", "neutral": "[~]",
+                                  "bearish": "[-]", "very_bearish": "[--]"}.get(article.get("sentiment", "neutral"), "[~]")
+                logger.info(f"    {sentiment_emoji} {article.get('title', 'N/A')[:60]}")
                 if article.get("summary"):
-                    summary = article.get("summary", "")[:100]
-                    logger.info(f"     Summary: {summary}...")
+                    logger.info(f"       Summary: {article.get('summary', '')[:80]}...")
+
+        # Top analyzed articles
+        if analyzed_articles:
+            logger.info("")
+            logger.info(f"  TOP ANALYZED ARTICLES:")
+            for i, article in enumerate(analyzed_articles[:5], 1):
+                sentiment_emoji = {"very_bullish": "[++]", "bullish": "[+]", "neutral": "[~]",
+                                  "bearish": "[-]", "very_bearish": "[--]"}.get(article.get("sentiment", "neutral"), "[~]")
+                age = article.get("age_hours", 0)
+                impact = article.get("impact_level", "low")
+                source = article.get("source", "Unknown")
+                logger.info(f"    {i}. {sentiment_emoji} [{impact.upper()}] {article.get('title', 'N/A')[:55]}")
+                logger.info(f"       Source: {source} | Age: {age:.1f}h | Score: {article.get('sentiment_score', 0):.2f}")
+                if article.get("key_points"):
+                    logger.info(f"       Key: {article.get('key_points', [''])[0][:60]}")
         else:
-            logger.info("  No relevant news found")
+            logger.info("  No news articles analyzed")
 
         # Log whale alerts
         logger.info("-" * 50)
@@ -189,7 +226,7 @@ class TradingAgent:
                     open_positions=open_positions,
                     current_exposure=current_exposure,
                     sentiment=sentiment,
-                    news=news,
+                    news_data=news_data,
                     whale_alerts=whale_alerts,
                     whale_flow=whale_flow,
                     coingecko=coingecko
@@ -219,7 +256,7 @@ class TradingAgent:
             logger.error(f"Failed to save portfolio snapshot: {e}")
 
         # Generate daily AI analysis (once per day per symbol)
-        self._generate_daily_analysis(sentiment, news, whale_flow)
+        self._generate_daily_analysis(sentiment, news_data, whale_flow)
 
         # Cleanup
         cache_manager.cleanup_expired()
@@ -260,7 +297,7 @@ class TradingAgent:
         open_positions: List[Dict[str, Any]],
         current_exposure: float,
         sentiment: Dict[str, Any],
-        news: List[Dict[str, Any]],
+        news_data: Dict[str, Any],
         whale_alerts: List[Dict[str, Any]],
         whale_flow: Dict[str, Any],
         coingecko: Dict[str, Any] = None
@@ -274,7 +311,7 @@ class TradingAgent:
             open_positions: List of open positions
             current_exposure: Current exposure percentage
             sentiment: Market sentiment data
-            news: Recent news
+            news_data: Advanced news analysis data (Dict with analysis, articles, sentiments)
             whale_alerts: Recent whale transactions
             whale_flow: Whale capital flow analysis
             coingecko: CoinGecko market data (global, trending, coins)
@@ -359,8 +396,9 @@ class TradingAgent:
             sentiment=sentiment,
             raw_data={
                 "market_data": market_data,
-                "news_count": len(news),
-                "news": news[:5] if news else [],
+                "news_analysis": news_data.get("analysis", {}),
+                "news_aggregated_sentiment": news_data.get("aggregated_sentiment", {}),
+                "news_symbol_sentiment": news_data.get("symbol_sentiments", {}).get(symbol, {}),
                 "whale_alerts_count": len(whale_alerts),
                 "whale_flow": whale_flow
             }
@@ -369,8 +407,12 @@ class TradingAgent:
         # 7. Check if we have an existing position
         has_position = portfolio_manager.client.has_open_position(symbol)
 
-        # 8. Get LLM decision
+        # 8. Get LLM decision with advanced news data
         logger.info("Requesting LLM decision...")
+
+        # Get symbol-specific news summary for LLM
+        news_for_llm = get_news_for_llm(news_data.get("analysis", {}), symbol=symbol)
+
         decision = llm_client.get_trading_decision(
             symbol=symbol,
             portfolio=portfolio,
@@ -380,7 +422,7 @@ class TradingAgent:
             forecast=forecast,
             orderbook=orderbook,
             sentiment=sentiment,
-            news=news,
+            news_data=news_for_llm,  # Pass enriched news data
             open_positions=open_positions,
             whale_flow=whale_flow,
             coingecko=coingecko
@@ -500,24 +542,82 @@ class TradingAgent:
                 "interpretation": "Sentiment unavailable"
             }
 
-    def _get_news_safe(self) -> List[Dict[str, Any]]:
-        """Get news with error handling and save to database."""
+    def _get_news_safe(self) -> Dict[str, Any]:
+        """
+        Get news with advanced AI analysis.
+
+        Returns:
+            Dictionary containing:
+            - raw_news: Original RSS news items
+            - analysis: Full analysis result from news_analyzer
+            - for_llm: Formatted data for LLM consumption
+        """
         try:
-            news = get_recent_news(10)  # Get more news for database storage
+            # Step 1: Get raw news from RSS feeds (more items for analysis)
+            raw_news = get_news_for_analysis(30)
+            logger.info(f"Fetched {len(raw_news)} raw news items from RSS feeds")
 
-            # Save news to database (deduplicates automatically)
-            if news:
-                try:
-                    saved_count = db_ops.save_news_batch(news)
-                    if saved_count > 0:
-                        logger.debug(f"Saved {saved_count} new news items to database")
-                except Exception as e:
-                    logger.debug(f"Error saving news to database: {e}")
+            if not raw_news:
+                return self._empty_news_result()
 
-            return news[:5]  # Return top 5 for LLM analysis
+            # Save raw news to database (deduplicates automatically)
+            try:
+                saved_count = db_ops.save_news_batch(raw_news)
+                if saved_count > 0:
+                    logger.debug(f"Saved {saved_count} new news items to database")
+            except Exception as e:
+                logger.debug(f"Error saving news to database: {e}")
+
+            # Step 2: Run advanced analysis (scraping + DeepSeek)
+            analysis = analyze_news(raw_news)
+
+            # Step 3: Save analyzed news to database
+            try:
+                analyzed_articles = analysis.get("analyzed_articles", [])
+                if analyzed_articles:
+                    saved = db_ops.save_analyzed_news_batch(analyzed_articles)
+                    if saved > 0:
+                        logger.debug(f"Saved {saved} analyzed news items to database")
+            except Exception as e:
+                logger.debug(f"Error saving analyzed news: {e}")
+
+            return {
+                "raw_news": raw_news,
+                "analysis": analysis,
+                "aggregated_sentiment": analysis.get("aggregated_sentiment", {}),
+                "symbol_sentiments": analysis.get("symbol_sentiments", {}),
+                "high_impact_news": analysis.get("high_impact_news", []),
+            }
+
         except Exception as e:
-            logger.warning(f"Failed to get news: {e}")
-            return []
+            logger.warning(f"Failed to get/analyze news: {e}")
+            return self._empty_news_result()
+
+    def _empty_news_result(self) -> Dict[str, Any]:
+        """Return empty news result structure."""
+        return {
+            "raw_news": [],
+            "analysis": {
+                "analyzed_articles": [],
+                "aggregated_sentiment": {
+                    "score": 0.0,
+                    "label": "neutral",
+                    "interpretation": "Nessuna news disponibile",
+                    "confidence": 0.0,
+                },
+                "symbol_sentiments": {},
+                "high_impact_news": [],
+                "total_analyzed": 0,
+            },
+            "aggregated_sentiment": {
+                "score": 0.0,
+                "label": "neutral",
+                "interpretation": "Nessuna news disponibile",
+                "confidence": 0.0,
+            },
+            "symbol_sentiments": {},
+            "high_impact_news": [],
+        }
 
     def _get_whale_alerts_safe(self) -> List[Dict[str, Any]]:
         """Get whale alerts with error handling and save to database."""
@@ -596,7 +696,7 @@ class TradingAgent:
     def _generate_daily_analysis(
         self,
         sentiment: Dict[str, Any],
-        news: List[Dict[str, Any]],
+        news_data: Dict[str, Any],
         whale_flow: Dict[str, Any]
     ) -> None:
         """
@@ -643,6 +743,9 @@ class TradingAgent:
                     "change_pct": context.get("forecast_change_pct")
                 }
 
+                # Get symbol-specific news for analysis
+                news_for_llm = get_news_for_llm(news_data.get("analysis", {}), symbol=symbol)
+
                 # Generate analysis using LLM
                 analysis = llm_client.generate_market_analysis(
                     symbol=symbol,
@@ -651,9 +754,14 @@ class TradingAgent:
                     pivot_points=pivot_points,
                     forecast=forecast,
                     sentiment=sentiment,
-                    news=news,
+                    news_data=news_for_llm,
                     whale_flow=whale_flow
                 )
+
+                # Extract news sentiment summary from analysis
+                news_aggregated = news_data.get("aggregated_sentiment", {})
+                symbol_sentiment = news_data.get("symbol_sentiments", {}).get(symbol, {})
+                analyzed_count = news_data.get("analysis", {}).get("total_analyzed", 0)
 
                 # Save to database
                 db_ops.save_ai_analysis(
@@ -669,11 +777,14 @@ class TradingAgent:
                     volatility_level=analysis.get("volatility_level"),
                     indicators_snapshot=indicators,
                     news_sentiment_summary={
-                        "total": len(news),
-                        "positive": sum(1 for n in news if n.get("sentiment") == "positive"),
-                        "negative": sum(1 for n in news if n.get("sentiment") == "negative"),
-                        "sentiment_score": sentiment.get("score"),
-                        "sentiment_label": sentiment.get("label")
+                        "total_analyzed": analyzed_count,
+                        "aggregated_score": news_aggregated.get("score", 0),
+                        "aggregated_label": news_aggregated.get("label", "neutral"),
+                        "symbol_score": symbol_sentiment.get("score", 0),
+                        "symbol_label": symbol_sentiment.get("label", "neutral"),
+                        "symbol_article_count": symbol_sentiment.get("article_count", 0),
+                        "fear_greed_score": sentiment.get("score"),
+                        "fear_greed_label": sentiment.get("label")
                     }
                 )
 

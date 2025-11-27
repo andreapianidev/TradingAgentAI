@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = Field(default=0.3)
     LLM_MAX_TOKENS: int = Field(default=2000)
 
+    # ============ LLM - DEEPSEEK NEWS ANALYZER ============
+    # Separate API key for news analysis (keeps costs isolated)
+    DEEPSEEK_NEWS_API_KEY: str = Field(default="")
+
     # ============ DATABASE ============
     # Primary database URL (legacy) - still used for SQLAlchemy migrations
     DATABASE_URL: str = Field(default="postgresql://user:password@localhost:5432/trading_agent")
