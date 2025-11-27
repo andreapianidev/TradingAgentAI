@@ -131,13 +131,37 @@ class DecisionValidator:
         if size != sanitized["position_size_pct"]:
             logger.info(f"Clamped position size from {size}% to {sanitized['position_size_pct']}%")
 
-        # Validate stop loss
+        # Validate stop loss (dynamic: 1-10%)
         stop_loss = decision.get("stop_loss_pct", settings.STOP_LOSS_PCT)
         sanitized["stop_loss_pct"] = max(1.0, min(10.0, float(stop_loss)))
 
-        # Validate take profit
+        # Validate take profit (dynamic: 2-20%)
         take_profit = decision.get("take_profit_pct", settings.TAKE_PROFIT_PCT)
-        sanitized["take_profit_pct"] = max(1.0, min(20.0, float(take_profit)))
+        sanitized["take_profit_pct"] = max(2.0, min(20.0, float(take_profit)))
+
+        # Validate Risk/Reward ratio (minimum 1.5:1)
+        sl = sanitized["stop_loss_pct"]
+        tp = sanitized["take_profit_pct"]
+        rr_ratio = tp / sl if sl > 0 else 0
+
+        if rr_ratio < 1.5:
+            # Adjust TP to meet minimum R:R of 1.5:1
+            min_tp = sl * 1.5
+            old_tp = tp
+            sanitized["take_profit_pct"] = max(2.0, min(20.0, min_tp))
+            logger.warning(
+                f"Risk/Reward ratio too low ({rr_ratio:.2f}:1). "
+                f"Adjusted TP from {old_tp}% to {sanitized['take_profit_pct']}% "
+                f"(new R:R = {sanitized['take_profit_pct']/sl:.2f}:1)"
+            )
+        else:
+            logger.info(
+                f"Dynamic TP/SL: SL={sl}%, TP={tp}%, R:R={rr_ratio:.2f}:1"
+            )
+
+        # Preserve tp_sl_reasoning if provided by LLM
+        if decision.get("tp_sl_reasoning"):
+            sanitized["tp_sl_reasoning"] = decision["tp_sl_reasoning"]
 
         # Validate confidence
         confidence = decision.get("confidence", 0)

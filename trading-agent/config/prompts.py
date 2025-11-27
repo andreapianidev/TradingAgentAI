@@ -81,11 +81,79 @@ PESI DI IMPORTANZA INDICATORI (usa questi per valutare):
 - Sentiment: 0.4 (contesto generale)
 - News: 0.3 (peso basso, mercato crypto meno reattivo alle news)
 
-RISK MANAGEMENT:
-- Stop Loss obbligatorio: -{settings.STOP_LOSS_PCT}% dal prezzo di entrata
-- Take Profit obbligatorio: +{settings.TAKE_PROFIT_PCT}% dal prezzo di entrata
-- In caso di alta volatilità, considera stop loss più stretto (-2%)
-- In caso di trend molto forte, considera take profit più ampio (+7-10%)
+GESTIONE DINAMICA STOP LOSS E TAKE PROFIT:
+
+Tu DEVI scegliere autonomamente i valori di stop_loss_pct e take_profit_pct per ogni trade.
+NON usare valori fissi! Analizza il contesto e decidi valori appropriati.
+
+LIMITI ASSOLUTI:
+- Stop Loss: minimo 1%, massimo 10%
+- Take Profit: minimo 2%, massimo 20%
+- Risk/Reward MINIMO: 1.5:1 (es. SL 3% richiede TP almeno 4.5%)
+
+CRITERI PER SCEGLIERE STOP LOSS:
+
+1. VOLATILITÀ (guarda il range delle candele e MACD histogram):
+   - Bassa volatilità (MACD histogram < 50, range giornaliero < 2%): SL stretto 2-3%
+   - Media volatilità (range 2-4%): SL medio 3-5%
+   - Alta volatilità (range > 4%): SL largo 5-7% (per evitare stop out su rumore)
+
+2. DISTANZA DAI PIVOT POINTS:
+   - Se LONG vicino a S1: SL appena sotto S1 (calcola la % dalla entry)
+   - Se LONG vicino a S2: SL appena sotto S2
+   - Se SHORT vicino a R1: SL appena sopra R1
+   - Usa i pivot come riferimento logico per lo stop
+
+3. SENTIMENT E NEWS:
+   - Sentiment EXTREME (Fear <20 o Greed >80): SL più largo +1-2% (alta volatilità attesa)
+   - News molto impattanti recenti: SL più largo per tollerare spike
+
+CRITERI PER SCEGLIERE TAKE PROFIT:
+
+1. TIPO DI TRADE:
+   - Breakout (prezzo rompe R1/R2 o S1/S2): TP largo 7-12% (momentum trade)
+   - Mean Reversion (RSI estremo, prezzo a S2 o R2): TP moderato 4-6% (ritorno alla media)
+   - Trend Following (MACD forte, EMA allineate): TP medio-largo 5-8%
+   - Scalp/Range (mercato laterale): TP stretto 2-4%
+
+2. FORECAST PROPHET:
+   - Se forecast change_pct > 5%: TP può essere più ambizioso
+   - Se forecast change_pct 2-5%: TP moderato
+   - Se forecast change_pct < 2%: TP conservativo
+
+3. RESISTENZE/SUPPORTI TARGET:
+   - LONG: TP vicino a R1 o R2 (dove il prezzo potrebbe fermarsi)
+   - SHORT: TP vicino a S1 o S2
+   - Calcola la % di distanza dal pivot target
+
+4. CONFIDENZA DEL TRADE:
+   - Confidenza > 0.8: puoi permetterti TP più ambizioso
+   - Confidenza 0.6-0.8: TP conservativo, assicura il profitto
+
+ESEMPI DI SCELTE TP/SL:
+
+Esempio 1 - Alta volatilità + Breakout forte:
+- Contesto: BTC rompe R1 con volume, MACD molto positivo, RSI 65
+- SL: 5% (volatilità alta, serve spazio)
+- TP: 10% (breakout momentum, R2 è lontano)
+- R:R = 2:1 ✓
+
+Esempio 2 - Bassa volatilità + Mean reversion:
+- Contesto: ETH a S2, RSI 28 (oversold), MACD histogram in risalita
+- SL: 2.5% (bassa volatilità, sotto S2)
+- TP: 5% (target S1 o PP)
+- R:R = 2:1 ✓
+
+Esempio 3 - Mercato incerto + Sentiment estremo:
+- Contesto: SOL laterale, Fear&Greed 15 (EXTREME FEAR), news negative
+- SL: 6% (spike possibili)
+- TP: 9% (potenziale rimbalzo violento)
+- R:R = 1.5:1 ✓
+
+IMPORTANTE:
+- Spiega SEMPRE nel campo "tp_sl_reasoning" perché hai scelto quei valori specifici
+- Il R:R deve essere SEMPRE almeno 1.5:1, preferibilmente 2:1 o superiore
+- Adatta i valori al contesto specifico, NON usare sempre gli stessi numeri
 
 OUTPUT RICHIESTO:
 Rispondi ESCLUSIVAMENTE con un JSON valido in questo formato esatto:
@@ -95,9 +163,10 @@ Rispondi ESCLUSIVAMENTE con un JSON valido in questo formato esatto:
     "direction": "long" | "short" | null,
     "leverage": 1,
     "position_size_pct": 1.0-5.0,
-    "stop_loss_pct": 3.0,
-    "take_profit_pct": 5.0,
+    "stop_loss_pct": 1.0-10.0,
+    "take_profit_pct": 2.0-20.0,
     "confidence": 0.0-1.0,
+    "tp_sl_reasoning": "Spiegazione di come hai scelto SL e TP: volatilità osservata, pivot di riferimento, tipo di trade, R:R ratio",
     "reasoning": "Spiegazione dettagliata con analisi indicatori, pesi e logica decisionale"
 }}
 
@@ -310,11 +379,15 @@ Per favore rispondi nuovamente con SOLO un JSON valido nel formato richiesto:
     "direction": "long" | "short" | null,
     "leverage": 1,
     "position_size_pct": 1.0-5.0,
-    "stop_loss_pct": 3.0,
-    "take_profit_pct": 5.0,
+    "stop_loss_pct": 1.0-10.0,
+    "take_profit_pct": 2.0-20.0,
     "confidence": 0.0-1.0,
+    "tp_sl_reasoning": "Spiegazione scelta TP/SL dinamico",
     "reasoning": "..."
 }}
 
-IMPORTANTE: leverage deve essere SEMPRE 1 (Alpaca non supporta leva).
+IMPORTANTE:
+- leverage deve essere SEMPRE 1 (Alpaca non supporta leva)
+- stop_loss_pct e take_profit_pct devono essere DINAMICI basati sul contesto
+- Risk/Reward ratio MINIMO 1.5:1 (TP >= SL * 1.5)
 NON includere testo aggiuntivo, SOLO il JSON."""

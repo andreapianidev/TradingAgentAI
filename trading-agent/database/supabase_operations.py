@@ -123,6 +123,20 @@ class SupabaseOperations:
         """
         # Store sanitized decision fields (may be null if converted to HOLD)
         # and raw LLM decision in execution_details for analysis
+
+        # Build execution_details with TP/SL reasoning and raw decision
+        execution_details = {}
+        if raw_llm_decision:
+            execution_details["raw_llm_decision"] = raw_llm_decision
+        if decision.get("tp_sl_reasoning"):
+            execution_details["tp_sl_reasoning"] = decision.get("tp_sl_reasoning")
+
+        # Calculate and store R:R ratio for analysis
+        sl = decision.get("stop_loss_pct", 0)
+        tp = decision.get("take_profit_pct", 0)
+        if sl and tp and sl > 0:
+            execution_details["risk_reward_ratio"] = round(tp / sl, 2)
+
         data = {
             "context_id": context_id,
             "symbol": symbol,
@@ -137,8 +151,7 @@ class SupabaseOperations:
             "reasoning": decision.get("reasoning"),
             "execution_status": execution_status,
             "trading_mode": "paper" if settings.PAPER_TRADING else "live",
-            # Store raw LLM decision in execution_details for analysis
-            "execution_details": {"raw_llm_decision": raw_llm_decision} if raw_llm_decision else None
+            "execution_details": execution_details if execution_details else None
         }
 
         result = self.client.table("trading_decisions").insert(data).execute()

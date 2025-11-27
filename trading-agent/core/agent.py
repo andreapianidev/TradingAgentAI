@@ -397,8 +397,14 @@ class TradingAgent:
             logger.info(f"  Direction: {decision.get('direction', 'N/A').upper()}")
             logger.info(f"  Position Size: {decision.get('position_size_pct', 0)}%")
             logger.info(f"  Leverage: {decision.get('leverage', 1)}x")
-            logger.info(f"  Stop Loss: {decision.get('stop_loss_pct', 0)}%")
-            logger.info(f"  Take Profit: {decision.get('take_profit_pct', 0)}%")
+            sl_pct = decision.get('stop_loss_pct', 0)
+            tp_pct = decision.get('take_profit_pct', 0)
+            rr_ratio = tp_pct / sl_pct if sl_pct > 0 else 0
+            logger.info(f"  Stop Loss: {sl_pct}% (DYNAMIC)")
+            logger.info(f"  Take Profit: {tp_pct}% (DYNAMIC)")
+            logger.info(f"  Risk/Reward: {rr_ratio:.2f}:1")
+            if decision.get('tp_sl_reasoning'):
+                logger.info(f"  TP/SL Reasoning: {decision.get('tp_sl_reasoning')}")
         logger.info(f"  Confidence: {confidence:.2%}")
         logger.info(f"  Reasoning: {decision.get('reasoning', 'N/A')}")
         logger.info("=" * 50)
