@@ -579,6 +579,22 @@ class AlpacaClient:
             alpaca_symbol = self._get_symbol(symbol)
             logger.info(f"Opening {direction} position for {symbol} (Alpaca: {alpaca_symbol})")
 
+            # IMPORTANT: Check for existing positions and clean up orphan orders
+            # This prevents "wash trade detected" errors from Alpaca when there are
+            # leftover TP/SL orders from previously closed positions
+            existing_position = self.get_position(symbol)
+            if existing_position:
+                # Position already exists - should not happen (validator should prevent this)
+                logger.warning(f"Position already open for {symbol}. Refusing to open another position.")
+                return {
+                    "success": False,
+                    "error": f"Position already open for {symbol}"
+                }
+
+            # No open position - safe to cancel orphan orders (from previously closed positions)
+            logger.info(f"Cancelling orphan orders for {alpaca_symbol} before opening new position...")
+            self._cancel_orders_for_symbol(alpaca_symbol)
+
             # Get current portfolio
             portfolio = self.fetch_portfolio()
             available = portfolio.get("available_balance", 0)

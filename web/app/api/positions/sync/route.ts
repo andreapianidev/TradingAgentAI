@@ -237,11 +237,66 @@ export async function POST() {
 
     // Close positions that exist in DB but not in Alpaca
     for (const [symbol, position] of Array.from(dbPositionMap.entries())) {
+      // Try to get current price for this symbol from Alpaca
+      let exitPrice = null
+      let realizedPnl = null
+      let realizedPnlPct = null
+
+      try {
+        // Construct the full symbol for Alpaca (add USD suffix)
+        const fullSymbol = `${symbol}USD`
+        const priceResponse = await fetch(
+          `${ALPACA_BASE_URL}/v2/positions/${fullSymbol}`,
+          {
+            headers: {
+              'APCA-API-KEY-ID': ALPACA_API_KEY!,
+              'APCA-API-SECRET-KEY': ALPACA_SECRET_KEY!,
+            },
+          }
+        )
+
+        // If position still exists in Alpaca but with different status, use its current price
+        if (priceResponse.ok) {
+          const posData = await priceResponse.json()
+          exitPrice = parseFloat(posData.current_price)
+        } else {
+          // Otherwise use the last unrealized_pnl to estimate exit price
+          // exit_price ≈ entry_price + (unrealized_pnl / quantity)
+          const entryPrice = parseFloat(String(position.entry_price))
+          const quantity = parseFloat(String(position.quantity))
+          const unrealizedPnl = parseFloat(String(position.unrealized_pnl || 0))
+          exitPrice = entryPrice + (unrealizedPnl / quantity)
+        }
+
+        // Calculate realized P&L
+        const entryPrice = parseFloat(String(position.entry_price))
+        const quantity = parseFloat(String(position.quantity))
+        const direction = position.direction
+
+        if (direction === 'long') {
+          realizedPnl = (exitPrice - entryPrice) * quantity
+        } else {
+          realizedPnl = (entryPrice - exitPrice) * quantity
+        }
+
+        const costBasis = entryPrice * quantity
+        realizedPnlPct = (realizedPnl / costBasis) * 100
+      } catch (error) {
+        console.error(`Failed to get exit price for ${symbol}:`, error)
+        // Use entry price as fallback
+        exitPrice = parseFloat(String(position.entry_price))
+        realizedPnl = 0
+        realizedPnlPct = 0
+      }
+
       const { error: closeError } = await supabase
         .from('trading_positions')
         .update({
           status: 'closed',
           exit_timestamp: now,
+          exit_price: exitPrice,
+          realized_pnl: realizedPnl,
+          realized_pnl_pct: realizedPnlPct,
           exit_reason: 'sync_not_found',
           updated_at: now,
         })
@@ -256,8 +311,9 @@ export async function POST() {
 
     // Update portfolio snapshot
     const totalEquity = parseFloat(alpacaAccount.equity)
-    const availableBalance = parseFloat(alpacaAccount.buying_power)
-    const marginUsed = totalEquity - availableBalance
+    const cash = parseFloat(alpacaAccount.cash)
+    const availableBalance = cash
+    const marginUsed = totalEquity - cash
 
     // Initial capital for PnL calculation
     const INITIAL_CAPITAL = 100000
@@ -279,6 +335,49 @@ export async function POST() {
     )
     const exposurePct = totalEquity > 0 ? (totalPositionValue / totalEquity) * 100 : 0
 
+    // Calculate win rate and total trades from closed positions
+    const { data: closedPositions } = await supabase
+      .from('trading_positions')
+      .select('realized_pnl')
+      .eq('status', 'closed')
+      .not('realized_pnl', 'is', null)
+
+    let winRate = 0
+    let totalTrades = 0
+
+    if (closedPositions && closedPositions.length > 0) {
+      totalTrades = closedPositions.length
+      const winningTrades = closedPositions.filter(
+        p => parseFloat(String(p.realized_pnl)) > 0
+      ).length
+      winRate = (winningTrades / totalTrades) * 100
+    }
+
+    // Calculate daily P&L (difference from start of day)
+    const startOfDay = new Date()
+    startOfDay.setHours(0, 0, 0, 0)
+
+    const { data: startOfDaySnapshot } = await supabase
+      .from('trading_portfolio_snapshots')
+      .select('total_equity_usdc')
+      .lte('timestamp', startOfDay.toISOString())
+      .order('timestamp', { ascending: false })
+      .limit(1)
+      .single()
+
+    let dailyPnl = 0
+    let dailyPnlPct = 0
+
+    if (startOfDaySnapshot) {
+      const startEquity = parseFloat(startOfDaySnapshot.total_equity_usdc)
+      dailyPnl = totalEquity - startEquity
+      dailyPnlPct = startEquity > 0 ? (dailyPnl / startEquity) * 100 : 0
+    } else {
+      // If no previous snapshot, use unrealized P&L as fallback
+      dailyPnl = totalUnrealizedPnl
+      dailyPnlPct = totalEquity > 0 ? (totalUnrealizedPnl / INITIAL_CAPITAL) * 100 : 0
+    }
+
     // Create portfolio snapshot
     await supabase.from('trading_portfolio_snapshots').insert({
       timestamp: now,
@@ -289,8 +388,10 @@ export async function POST() {
       exposure_pct: exposurePct,
       total_pnl: totalPnl,
       total_pnl_pct: totalPnlPct,
-      daily_pnl: totalUnrealizedPnl,
-      daily_pnl_pct: totalEquity > 0 ? (totalUnrealizedPnl / INITIAL_CAPITAL) * 100 : 0,
+      daily_pnl: dailyPnl,
+      daily_pnl_pct: dailyPnlPct,
+      win_rate: winRate,
+      total_trades: totalTrades,
       trading_mode: tradingMode,
     })
 

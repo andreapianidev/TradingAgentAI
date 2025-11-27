@@ -134,13 +134,13 @@ export async function GET() {
 
       return {
         symbol,
-        qty: parseFloat(p.qty),
-        entryPrice: parseFloat(p.avg_entry_price),
-        currentPrice: parseFloat(p.current_price),
-        marketValue: parseFloat(p.market_value),
-        unrealizedPnl: parseFloat(p.unrealized_pl),
-        unrealizedPnlPct: parseFloat(p.unrealized_plpc) * 100,
-        changeToday: parseFloat(p.change_today) * 100,
+        qty: parseFloat(p.qty) || 0,
+        entryPrice: parseFloat(p.avg_entry_price) || 0,
+        currentPrice: parseFloat(p.current_price) || 0,
+        marketValue: parseFloat(p.market_value) || 0,
+        unrealizedPnl: parseFloat(p.unrealized_pl) || 0,
+        unrealizedPnlPct: (parseFloat(p.unrealized_plpc) || 0) * 100,
+        changeToday: (parseFloat(p.change_today) || 0) * 100,
       }
     })
 
