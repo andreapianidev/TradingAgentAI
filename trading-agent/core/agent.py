@@ -2,9 +2,10 @@
 Main trading agent orchestration.
 """
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, date
 
 from config.settings import settings
+from config.supabase_settings import supabase_settings
 from config.constants import ACTION_HOLD, EXECUTION_SKIPPED
 
 from exchange.order_manager import order_manager
@@ -258,6 +259,9 @@ class TradingAgent:
         # Generate daily AI analysis (once per day per symbol)
         self._generate_daily_analysis(sentiment, news_data, whale_flow)
 
+        # Check cost alerts
+        self._check_cost_alerts()
+
         # Cleanup
         cache_manager.cleanup_expired()
 
@@ -413,7 +417,7 @@ class TradingAgent:
         # Get symbol-specific news summary for LLM
         news_for_llm = get_news_for_llm(news_data.get("analysis", {}), symbol=symbol)
 
-        decision = llm_client.get_trading_decision(
+        decision, usage_metadata = llm_client.get_trading_decision(
             symbol=symbol,
             portfolio=portfolio,
             market_data=market_data,
@@ -427,6 +431,22 @@ class TradingAgent:
             whale_flow=whale_flow,
             coingecko=coingecko
         )
+
+        # Save LLM cost to database
+        if usage_metadata and usage_metadata.get("cost_usd", 0) > 0:
+            try:
+                db_ops.save_llm_cost(
+                    symbol=symbol,
+                    input_tokens=usage_metadata.get("input_tokens", 0),
+                    output_tokens=usage_metadata.get("output_tokens", 0),
+                    cost_usd=usage_metadata.get("cost_usd", 0),
+                    cached_tokens=usage_metadata.get("cached_tokens", 0),
+                    model=usage_metadata.get("model"),
+                    details={"provider": usage_metadata.get("provider", "deepseek"), "type": "trading_decision"}
+                )
+                logger.debug(f"Saved LLM cost: ${usage_metadata.get('cost_usd', 0):.6f}")
+            except Exception as e:
+                logger.warning(f"Failed to save LLM cost: {e}")
 
         action = decision.get("action", ACTION_HOLD)
         confidence = decision.get("confidence", 0)
@@ -769,7 +789,7 @@ class TradingAgent:
                 news_for_llm = get_news_for_llm(news_data.get("analysis", {}), symbol=symbol)
 
                 # Generate analysis using LLM
-                analysis = llm_client.generate_market_analysis(
+                analysis, usage_metadata = llm_client.generate_market_analysis(
                     symbol=symbol,
                     price=price,
                     indicators=indicators,
@@ -779,6 +799,22 @@ class TradingAgent:
                     news_data=news_for_llm,
                     whale_flow=whale_flow
                 )
+
+                # Save LLM cost for daily analysis
+                if usage_metadata and usage_metadata.get("cost_usd", 0) > 0:
+                    try:
+                        db_ops.save_llm_cost(
+                            symbol=symbol,
+                            input_tokens=usage_metadata.get("input_tokens", 0),
+                            output_tokens=usage_metadata.get("output_tokens", 0),
+                            cost_usd=usage_metadata.get("cost_usd", 0),
+                            cached_tokens=usage_metadata.get("cached_tokens", 0),
+                            model=usage_metadata.get("model"),
+                            details={"provider": usage_metadata.get("provider", "deepseek"), "type": "daily_analysis"}
+                        )
+                        logger.debug(f"Saved daily analysis LLM cost: ${usage_metadata.get('cost_usd', 0):.6f}")
+                    except Exception as e:
+                        logger.warning(f"Failed to save daily analysis LLM cost: {e}")
 
                 # Extract news sentiment summary from analysis
                 news_aggregated = news_data.get("aggregated_sentiment", {})
@@ -814,6 +850,49 @@ class TradingAgent:
 
             except Exception as e:
                 logger.warning(f"Failed to generate AI analysis for {symbol}: {e}")
+
+    def _check_cost_alerts(self) -> None:
+        """Check if daily costs exceed configured threshold and create alert."""
+        try:
+            # Get cost alert setting
+            threshold_setting = supabase_settings.get_setting('cost_alert_daily_threshold_usd')
+
+            if not threshold_setting:
+                logger.debug("Cost alert setting not configured, skipping check")
+                return
+
+            if not threshold_setting.get('enabled', False):
+                logger.debug("Cost alerts disabled, skipping check")
+                return
+
+            threshold = float(threshold_setting.get('threshold', 1.0))
+
+            # Get today's costs
+            today = date.today().isoformat()
+            totals = db_ops.get_cost_totals(start_date=today)
+            daily_cost = totals.get('total_cost_usd', 0)
+
+            if daily_cost > threshold:
+                # Create alert
+                db_ops.save_alert(
+                    alert_type='high_cost',
+                    title='Daily Cost Threshold Exceeded',
+                    message=f'Operating costs today: ${daily_cost:.4f} (threshold: ${threshold:.2f})',
+                    severity='warning',
+                    details={
+                        'daily_cost_usd': daily_cost,
+                        'threshold_usd': threshold,
+                        'llm_cost_usd': totals.get('llm_cost_usd', 0),
+                        'trading_fee_usd': totals.get('trading_fee_usd', 0),
+                        'date': today
+                    }
+                )
+                logger.warning(f"Cost alert: Daily costs ${daily_cost:.4f} exceeded threshold ${threshold:.2f}")
+            else:
+                logger.debug(f"Daily costs ${daily_cost:.4f} within threshold ${threshold:.2f}")
+
+        except Exception as e:
+            logger.warning(f"Failed to check cost alerts: {e}")
 
     def shutdown(self) -> None:
         """Clean shutdown of all components."""

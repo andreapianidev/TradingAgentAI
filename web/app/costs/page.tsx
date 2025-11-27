@@ -42,6 +42,14 @@ interface CostTotals {
   savingsFromCache: number
 }
 
+interface ROIData {
+  totalCosts: number
+  realizedProfit: number
+  netProfit: number
+  roiPercentage: number
+  tradesClosed: number
+}
+
 interface EnrichedCost extends TradingCost {
   decision?: {
     action: string
@@ -70,6 +78,13 @@ export default function CostsPage() {
   })
   const [dailyCosts, setDailyCosts] = useState<{ date: string; llm: number; fees: number }[]>([])
   const [costBySymbol, setCostBySymbol] = useState<Record<string, { llm: number; fees: number; count: number }>>({})
+  const [roiData, setRoiData] = useState<ROIData>({
+    totalCosts: 0,
+    realizedProfit: 0,
+    netProfit: 0,
+    roiPercentage: 0,
+    tradesClosed: 0
+  })
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
   const [isVisible, setIsVisible] = useState(false)
   const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null)
@@ -103,7 +118,7 @@ export default function CostsPage() {
 
       // Fetch related decisions for enrichment
       const decisionIds = costs?.filter(c => c.decision_id).map(c => c.decision_id) || []
-      let decisionsMap: Record<string, TradingDecision> = {}
+      let decisionsMap: Record<string, { id: string; action: string; direction: string | null; confidence: number; reasoning: string }> = {}
 
       if (decisionIds.length > 0) {
         const { data: decisions } = await supabase
@@ -115,7 +130,7 @@ export default function CostsPage() {
           decisionsMap = decisions.reduce((acc, d) => {
             acc[d.id] = d
             return acc
-          }, {} as Record<string, TradingDecision>)
+          }, {} as Record<string, { id: string; action: string; direction: string | null; confidence: number; reasoning: string }>)
         }
       }
 
@@ -185,6 +200,32 @@ export default function CostsPage() {
           bySymbol[sym].count++
         })
         setCostBySymbol(bySymbol)
+
+        // Fetch closed positions for ROI calculation
+        const { data: closedPositions } = await supabase
+          .from('trading_positions')
+          .select('realized_pnl, exit_timestamp')
+          .eq('status', 'closed')
+          .gte('exit_timestamp', startDate.toISOString())
+
+        if (closedPositions) {
+          const totalProfit = closedPositions.reduce(
+            (sum, p) => sum + safeNumber(p.realized_pnl),
+            0
+          )
+          const totalCosts = costs.reduce((sum: number, c: TradingCost) => sum + safeNumber(c.cost_usd), 0)
+          const netProfit = totalProfit - totalCosts
+          const roiPct = totalCosts > 0 ? ((netProfit / totalCosts) * 100) : 0
+
+          setRoiData({
+            totalCosts,
+            realizedProfit: totalProfit,
+            netProfit,
+            roiPercentage: roiPct,
+            tradesClosed: closedPositions.length
+          })
+        }
+
         setLastUpdate(new Date())
       }
     } catch (error) {
@@ -316,7 +357,7 @@ export default function CostsPage() {
       </div>
 
       {/* Summary Cards with animations */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Total Cost */}
         <div className="group relative bg-gradient-to-br from-yellow-500/20 via-yellow-500/10 to-amber-500/5 border border-yellow-500/30 rounded-2xl p-6 hover:shadow-xl hover:shadow-yellow-500/10 transition-all duration-300 hover:-translate-y-1 overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-yellow-500/10 rounded-full blur-2xl -mr-16 -mt-16 group-hover:bg-yellow-500/20 transition-colors" />
@@ -398,6 +439,46 @@ export default function CostsPage() {
             </div>
             <div className="text-sm text-gray-500">
               Average per LLM call
+            </div>
+          </div>
+        </div>
+
+        {/* ROI Card */}
+        <div className={cn(
+          "group relative rounded-2xl p-6 hover:shadow-xl transition-all duration-300 hover:-translate-y-1 overflow-hidden border",
+          roiData.netProfit >= 0
+            ? "bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border-emerald-500/20 hover:shadow-emerald-500/10"
+            : "bg-gradient-to-br from-red-500/10 to-red-500/5 border-red-500/20 hover:shadow-red-500/10"
+        )}>
+          <div className={cn(
+            "absolute top-0 right-0 w-32 h-32 rounded-full blur-2xl -mr-16 -mt-16 transition-colors",
+            roiData.netProfit >= 0 ? "bg-emerald-500/10 group-hover:bg-emerald-500/20" : "bg-red-500/10 group-hover:bg-red-500/20"
+          )} />
+          <div className="relative">
+            <div className={cn(
+              "flex items-center gap-2 mb-3",
+              roiData.netProfit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
+            )}>
+              <div className={cn(
+                "p-2 rounded-lg",
+                roiData.netProfit >= 0 ? "bg-emerald-500/20" : "bg-red-500/20"
+              )}>
+                {roiData.netProfit >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+              </div>
+              <span className="text-sm font-semibold uppercase tracking-wide">ROI</span>
+            </div>
+            <div className={cn(
+              "text-3xl font-bold mb-1 tabular-nums",
+              roiData.netProfit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
+            )}>
+              {roiData.roiPercentage >= 0 ? '+' : ''}{roiData.roiPercentage.toFixed(1)}%
+            </div>
+            <div className="text-sm text-gray-500 flex items-center gap-1">
+              <span className={roiData.netProfit >= 0 ? "text-emerald-600" : "text-red-600"}>
+                {formatCurrency(Math.abs(roiData.netProfit))}
+              </span>
+              <span>{roiData.netProfit >= 0 ? 'profit' : 'loss'}</span>
+              <span className="text-gray-400">({roiData.tradesClosed} trades)</span>
             </div>
           </div>
         </div>

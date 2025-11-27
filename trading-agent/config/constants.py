@@ -43,6 +43,19 @@ SENTIMENT_NEUTRAL_MAX = 45
 CACHE_SENTIMENT_DURATION = 3600  # 1 hour
 CACHE_NEWS_DURATION = 1800       # 30 minutes
 CACHE_WHALE_DURATION = 900       # 15 minutes
+CACHE_NEWS_ANALYSIS_TTL = 1800   # 30 minutes for analyzed news cache
+
+# HTTP Timeouts (seconds) - unified across all modules
+HTTP_TIMEOUT_RSS = 15.0          # RSS feed fetching
+HTTP_TIMEOUT_SCRAPE = 20.0       # Article scraping
+HTTP_TIMEOUT_DEEPSEEK = 45.0     # DeepSeek API calls
+HTTP_TIMEOUT_DEFAULT = 30.0      # Default for other HTTP calls
+
+# Rate limiting
+DEEPSEEK_RATE_LIMIT_PER_MIN = 30  # Max DeepSeek API calls per minute
+NEWS_ANALYSIS_MAX_WORKERS = 2     # Concurrent article analysis threads
+NEWS_ANALYSIS_MAX_RETRIES = 2     # Max retries for failed API calls
+NEWS_ANALYSIS_RETRY_DELAY = 2.0   # Base delay for exponential backoff
 
 # OHLCV data
 OHLCV_LIMIT = 200  # Number of candles to fetch
@@ -52,10 +65,12 @@ INDICATOR_WEIGHTS = {
     "pivot_points": 0.8,
     "macd": 0.7,
     "rsi": 0.7,
+    "whale_flow": 0.65,
     "forecast": 0.6,
+    "news": 0.55,          # AI-analyzed news (increased from 0.3)
+    "coingecko": 0.5,
     "orderbook": 0.5,
     "sentiment": 0.4,
-    "news": 0.3,
 }
 
 # Trading actions

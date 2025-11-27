@@ -69,8 +69,10 @@ class Settings(BaseSettings):
     # These can be overridden from Supabase
     TARGET_SYMBOLS: str = Field(default="BTC,ETH,SOL")
     TIMEFRAME: str = Field(default="15m")
-    MAX_LEVERAGE: int = Field(default=10)
-    DEFAULT_LEVERAGE: int = Field(default=3)
+    # NOTE: Alpaca crypto does NOT support leverage. These are kept for compatibility
+    # but are always forced to 1 in the DecisionValidator when using Alpaca.
+    MAX_LEVERAGE: int = Field(default=1)  # Always 1 for Alpaca crypto
+    DEFAULT_LEVERAGE: int = Field(default=1)  # Always 1 for Alpaca crypto
     MAX_POSITION_SIZE_PCT: float = Field(default=5.0)
     MAX_TOTAL_EXPOSURE_PCT: float = Field(default=30.0)
 
@@ -98,6 +100,15 @@ class Settings(BaseSettings):
     COINMARKETCAP_API_KEY: str = Field(default="")
     NEWS_FEED_URL: str = Field(default="")
     WHALE_ALERT_API_KEY: str = Field(default="")
+
+    # ============ NEWS CONFIGURATION ============
+    # Comma-separated list of RSS feed URLs
+    NEWS_RSS_FEEDS: str = Field(
+        default="https://cointelegraph.com/rss,https://bitcoinmagazine.com/.rss/full/,https://www.coindesk.com/arc/outboundfeeds/rss/,https://decrypt.co/feed,https://bitcoinist.com/feed/,https://www.newsbtc.com/feed/"
+    )
+    NEWS_MAX_ARTICLES_PER_FEED: int = Field(default=20)
+    NEWS_MAX_ARTICLES_TO_ANALYZE: int = Field(default=20)
+    NEWS_MAX_AGE_HOURS: int = Field(default=4)
 
     # ============ PAPER TRADING MODE ============
     # Can be controlled from Supabase dashboard
@@ -128,6 +139,11 @@ class Settings(BaseSettings):
     def symbols_list(self) -> List[str]:
         """Return target symbols as a list."""
         return [s.strip() for s in self.TARGET_SYMBOLS.split(",")]
+
+    @property
+    def rss_feeds_list(self) -> List[str]:
+        """Return RSS feeds as a list."""
+        return [f.strip() for f in self.NEWS_RSS_FEEDS.split(",") if f.strip()]
 
     @property
     def is_using_supabase(self) -> bool:

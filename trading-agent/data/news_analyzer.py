@@ -7,6 +7,8 @@ This module provides comprehensive news analysis:
 - Freshness filtering (only recent news)
 - Symbol-specific relevance scoring
 - Aggregated market sentiment calculation
+- Rate limiting and retry logic for API calls
+- Cache with TTL for analyzed articles
 """
 import re
 import json
@@ -20,24 +22,25 @@ import httpx
 from bs4 import BeautifulSoup
 
 from config.settings import settings
+from config.constants import (
+    CACHE_NEWS_ANALYSIS_TTL,
+    HTTP_TIMEOUT_SCRAPE,
+    HTTP_TIMEOUT_DEEPSEEK,
+    NEWS_ANALYSIS_MAX_WORKERS,
+    NEWS_ANALYSIS_MAX_RETRIES,
+    NEWS_ANALYSIS_RETRY_DELAY,
+)
 from utils.logger import get_logger
+from utils.rate_limiter import deepseek_rate_limiter
 
 logger = get_logger(__name__)
 
-# Maximum age for news to be considered (in hours)
-MAX_NEWS_AGE_HOURS = 4
+# Use settings for configurable values, constants for fixed values
+MAX_NEWS_AGE_HOURS = settings.NEWS_MAX_AGE_HOURS
+MAX_ARTICLES_TO_ANALYZE = settings.NEWS_MAX_ARTICLES_TO_ANALYZE
 
 # Minimum article length to be considered valid (characters)
 MIN_ARTICLE_LENGTH = 200
-
-# Maximum articles to analyze per cycle
-MAX_ARTICLES_TO_ANALYZE = 20
-
-# Request timeout for article scraping
-SCRAPE_TIMEOUT = 15.0
-
-# DeepSeek API timeout
-DEEPSEEK_TIMEOUT = 30.0
 
 # Symbol keywords for relevance scoring
 SYMBOL_KEYWORDS = {
@@ -84,7 +87,7 @@ REGOLE:
 
 
 class DeepSeekNewsClient:
-    """Client for DeepSeek API specifically for news analysis."""
+    """Client for DeepSeek API specifically for news analysis with rate limiting and retry."""
 
     def __init__(self):
         """Initialize the DeepSeek news client."""
@@ -92,25 +95,79 @@ class DeepSeekNewsClient:
         self.base_url = settings.DEEPSEEK_BASE_URL
         self.model = settings.MODEL_NAME
         self._client: Optional[httpx.Client] = None
+        self.rate_limiter = deepseek_rate_limiter
 
     @property
     def client(self) -> httpx.Client:
         """Get or create HTTP client."""
         if self._client is None or self._client.is_closed:
-            self._client = httpx.Client(timeout=DEEPSEEK_TIMEOUT)
+            self._client = httpx.Client(timeout=HTTP_TIMEOUT_DEEPSEEK)
         return self._client
 
     def is_configured(self) -> bool:
         """Check if the news API key is configured."""
         return bool(self.api_key and self.api_key != "your_deepseek_news_api_key")
 
-    def analyze_article(self, title: str, content: str) -> Optional[Dict[str, Any]]:
+    def _parse_deepseek_response(self, content_text: str) -> Optional[Dict[str, Any]]:
         """
-        Analyze a single article using DeepSeek.
+        Parse DeepSeek response with robust JSON extraction.
+
+        Args:
+            content_text: Raw response text from DeepSeek
+
+        Returns:
+            Parsed JSON dictionary or None if parsing fails
+        """
+        # Remove markdown code blocks if present
+        content_text = re.sub(r'```json\s*', '', content_text)
+        content_text = re.sub(r'```\s*', '', content_text)
+        content_text = content_text.strip()
+
+        # Try to find JSON object
+        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', content_text)
+        if not json_match:
+            # Fallback: try greedy match for nested objects
+            json_match = re.search(r'\{[\s\S]*\}', content_text)
+
+        if not json_match:
+            logger.warning(f"No JSON found in DeepSeek response: {content_text[:200]}")
+            return None
+
+        try:
+            data = json.loads(json_match.group())
+
+            # Validate required fields
+            required_fields = ["sentiment", "sentiment_score", "impact_level"]
+            missing = [f for f in required_fields if f not in data]
+            if missing:
+                logger.warning(f"Missing required fields in DeepSeek response: {missing}")
+                # Try to provide defaults for missing fields
+                if "sentiment" not in data:
+                    data["sentiment"] = "neutral"
+                if "sentiment_score" not in data:
+                    data["sentiment_score"] = 0.0
+                if "impact_level" not in data:
+                    data["impact_level"] = "low"
+
+            return data
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON decode error: {e}. Content: {json_match.group()[:200]}")
+            return None
+
+    def analyze_article(
+        self,
+        title: str,
+        content: str,
+        max_retries: int = NEWS_ANALYSIS_MAX_RETRIES
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Analyze a single article using DeepSeek with retry logic.
 
         Args:
             title: Article title
             content: Full article content
+            max_retries: Maximum number of retry attempts
 
         Returns:
             Analysis result dictionary or None on error
@@ -126,46 +183,92 @@ class DeepSeekNewsClient:
 
         prompt = NEWS_ANALYSIS_PROMPT.format(title=title, content=content)
 
-        try:
-            response = self.client.post(
-                f"{self.base_url}/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": "Sei un analista finanziario crypto. Rispondi SOLO in JSON valido."},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0.3,
-                    "max_tokens": 800,
-                },
-            )
-            response.raise_for_status()
+        for attempt in range(max_retries + 1):
+            try:
+                # Apply rate limiting before each request
+                wait_time = self.rate_limiter.wait()
+                if wait_time > 0:
+                    logger.debug(f"Rate limiter: waited {wait_time:.2f}s before DeepSeek call")
 
-            data = response.json()
-            content_text = data["choices"][0]["message"]["content"].strip()
+                response = self.client.post(
+                    f"{self.base_url}/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "messages": [
+                            {"role": "system", "content": "Sei un analista finanziario crypto. Rispondi SOLO in JSON valido."},
+                            {"role": "user", "content": prompt},
+                        ],
+                        "temperature": 0.3,
+                        "max_tokens": 800,
+                    },
+                )
+                response.raise_for_status()
 
-            # Extract JSON from response (handle potential markdown)
-            json_match = re.search(r'\{[\s\S]*\}', content_text)
-            if json_match:
-                analysis = json.loads(json_match.group())
-                return analysis
+                # Signal success to adaptive rate limiter
+                self.rate_limiter.on_success()
 
-            logger.warning(f"Could not parse DeepSeek response: {content_text[:200]}")
-            return None
+                data = response.json()
+                content_text = data["choices"][0]["message"]["content"].strip()
 
-        except httpx.HTTPStatusError as e:
-            logger.error(f"DeepSeek API error: {e.response.status_code}")
-            return None
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON parse error in DeepSeek response: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Error analyzing article with DeepSeek: {e}")
-            return None
+                # Use robust JSON parsing
+                analysis = self._parse_deepseek_response(content_text)
+                if analysis:
+                    return analysis
+
+                # If parsing failed but no exception, don't retry
+                logger.warning(f"Could not parse DeepSeek response for: {title[:50]}")
+                return None
+
+            except httpx.TimeoutException:
+                if attempt < max_retries:
+                    delay = NEWS_ANALYSIS_RETRY_DELAY * (2 ** attempt)  # Exponential backoff
+                    logger.warning(f"DeepSeek timeout (attempt {attempt + 1}/{max_retries + 1}), "
+                                  f"retrying in {delay:.1f}s...")
+                    time.sleep(delay)
+                    continue
+                logger.error(f"DeepSeek timeout after {max_retries + 1} attempts")
+                return None
+
+            except httpx.HTTPStatusError as e:
+                status_code = e.response.status_code
+
+                if status_code == 429:  # Rate limit
+                    # Signal rate limit to adaptive limiter
+                    new_interval = self.rate_limiter.on_rate_limit_error()
+                    if attempt < max_retries:
+                        delay = max(5.0, new_interval * 2)
+                        logger.warning(f"DeepSeek rate limit hit (attempt {attempt + 1}), "
+                                      f"backing off {delay:.1f}s...")
+                        time.sleep(delay)
+                        continue
+                    logger.error("DeepSeek rate limit exceeded after retries")
+                    return None
+
+                elif status_code in (500, 502, 503, 504):  # Server errors
+                    if attempt < max_retries:
+                        delay = NEWS_ANALYSIS_RETRY_DELAY * (2 ** attempt)
+                        logger.warning(f"DeepSeek server error {status_code} (attempt {attempt + 1}), "
+                                      f"retrying in {delay:.1f}s...")
+                        time.sleep(delay)
+                        continue
+
+                # Non-retriable error
+                logger.error(f"DeepSeek API error: {status_code}")
+                return None
+
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON parse error in DeepSeek response: {e}")
+                return None
+
+            except Exception as e:
+                logger.error(f"Error analyzing article with DeepSeek: {e}")
+                return None
+
+        return None
 
     def close(self):
         """Close the HTTP client."""
@@ -189,7 +292,7 @@ class ArticleScraper:
     def client(self) -> httpx.Client:
         """Get or create HTTP client."""
         if self._client is None or self._client.is_closed:
-            self._client = httpx.Client(timeout=SCRAPE_TIMEOUT, follow_redirects=True)
+            self._client = httpx.Client(timeout=HTTP_TIMEOUT_SCRAPE, follow_redirects=True)
         return self._client
 
     def scrape_article(self, url: str) -> Optional[str]:
@@ -282,14 +385,70 @@ class NewsAnalyzer:
     - Freshness filtering
     - Symbol-specific relevance
     - Aggregated sentiment calculation
+    - Cache with TTL for analyzed articles
     """
 
     def __init__(self):
         """Initialize the news analyzer."""
         self.deepseek = DeepSeekNewsClient()
         self.scraper = ArticleScraper()
-        self._cache: Dict[str, Dict[str, Any]] = {}  # URL -> analysis cache
-        self._cache_time: Optional[datetime] = None
+        # Cache with TTL: {cache_key: (timestamp, data)}
+        self._cache: Dict[str, Tuple[datetime, Dict[str, Any]]] = {}
+        self._cache_ttl = timedelta(seconds=CACHE_NEWS_ANALYSIS_TTL)
+
+    def _get_from_cache(self, cache_key: str) -> Optional[Dict[str, Any]]:
+        """
+        Get item from cache if not expired.
+
+        Args:
+            cache_key: Cache key to look up
+
+        Returns:
+            Cached data if valid, None if expired or not found
+        """
+        if cache_key not in self._cache:
+            return None
+
+        timestamp, data = self._cache[cache_key]
+        now = datetime.now(timezone.utc)
+
+        if now - timestamp < self._cache_ttl:
+            return data
+
+        # Expired - remove from cache
+        del self._cache[cache_key]
+        return None
+
+    def _set_cache(self, cache_key: str, data: Dict[str, Any]) -> None:
+        """
+        Store item in cache with current timestamp.
+
+        Args:
+            cache_key: Cache key
+            data: Data to cache
+        """
+        self._cache[cache_key] = (datetime.now(timezone.utc), data)
+
+    def _cleanup_expired_cache(self) -> int:
+        """
+        Remove expired entries from cache.
+
+        Returns:
+            Number of entries removed
+        """
+        now = datetime.now(timezone.utc)
+        expired_keys = [
+            key for key, (timestamp, _) in self._cache.items()
+            if now - timestamp >= self._cache_ttl
+        ]
+
+        for key in expired_keys:
+            del self._cache[key]
+
+        if expired_keys:
+            logger.debug(f"Cleaned up {len(expired_keys)} expired cache entries")
+
+        return len(expired_keys)
 
     def _parse_date(self, date_str: str) -> Optional[datetime]:
         """Parse various date formats to datetime."""
@@ -462,8 +621,8 @@ class NewsAnalyzer:
         analyzed_articles = []
         high_impact_news = []
 
-        # Use threading for parallel scraping
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        # Use threading for parallel scraping (limited workers to respect rate limits)
+        with ThreadPoolExecutor(max_workers=NEWS_ANALYSIS_MAX_WORKERS) as executor:
             # Submit scraping tasks
             future_to_item = {
                 executor.submit(self._analyze_single_item, item): item
@@ -513,11 +672,12 @@ class NewsAnalyzer:
         if not url or not title:
             return None
 
-        # Check cache first
+        # Check cache first (with TTL)
         cache_key = hashlib.md5(url.encode()).hexdigest()
-        if cache_key in self._cache:
+        cached_result = self._get_from_cache(cache_key)
+        if cached_result:
             logger.debug(f"Using cached analysis for: {title[:50]}")
-            return self._cache[cache_key]
+            return cached_result
 
         # Scrape full article
         full_content = self.scraper.scrape_article(url)
@@ -546,8 +706,8 @@ class NewsAnalyzer:
             "content_length": len(content_to_analyze) if content_to_analyze else 0,
         }
 
-        # Cache the result
-        self._cache[cache_key] = result
+        # Cache the result with TTL
+        self._set_cache(cache_key, result)
 
         return result
 

@@ -1,5 +1,7 @@
 """
 News feed parser for crypto news.
+
+Collects news from configurable RSS feeds with deduplication and caching.
 """
 import re
 import hashlib
@@ -10,13 +12,10 @@ from xml.etree import ElementTree
 import httpx
 
 from config.settings import settings
-from config.constants import CACHE_NEWS_DURATION
+from config.constants import CACHE_NEWS_DURATION, HTTP_TIMEOUT_RSS
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-# Timeout for individual feed requests (seconds)
-FEED_REQUEST_TIMEOUT = 10.0
 
 # Keywords to filter crypto-relevant news
 CRYPTO_KEYWORDS = [
@@ -48,17 +47,9 @@ class NewsFeedCollector:
         self._cache: List[Dict[str, Any]] = []
         self._cache_time: Optional[datetime] = None
         self._seen_hashes: Set[str] = set()  # Track seen news hashes for dedup
-        # Default feeds if not configured - multiple sources for better coverage
-        self.default_feeds = [
-            # Original feeds
-            "https://cointelegraph.com/rss",
-            "https://bitcoinmagazine.com/.rss/full/",
-            # Additional feeds for more coverage
-            "https://www.coindesk.com/arc/outboundfeeds/rss/",
-            "https://decrypt.co/feed",
-            "https://bitcoinist.com/feed/",
-            "https://www.newsbtc.com/feed/",
-        ]
+        # Use feeds from settings (configurable via env or Supabase)
+        self.feeds = settings.rss_feeds_list
+        self.max_articles_per_feed = settings.NEWS_MAX_ARTICLES_PER_FEED
 
     def get_recent_news(self, limit: int = 10) -> List[Dict[str, Any]]:
         """
@@ -102,8 +93,8 @@ class NewsFeedCollector:
         all_news = []
         self._seen_hashes.clear()  # Reset for fresh fetch
 
-        # Use configured feed or defaults
-        feeds = [self.feed_url] if self.feed_url else self.default_feeds
+        # Use configured feed URL or settings feeds list
+        feeds = [self.feed_url] if self.feed_url else self.feeds
         successful_feeds = 0
         failed_feeds = 0
         successful_sources = []
@@ -172,7 +163,7 @@ class NewsFeedCollector:
         news_items = []
 
         try:
-            with httpx.Client(timeout=FEED_REQUEST_TIMEOUT) as client:
+            with httpx.Client(timeout=HTTP_TIMEOUT_RSS) as client:
                 response = client.get(feed_url)
                 response.raise_for_status()
 
@@ -184,13 +175,13 @@ class NewsFeedCollector:
                     # Try Atom format
                     items = root.findall(".//{http://www.w3.org/2005/Atom}entry")
 
-                for item in items[:20]:  # Limit per feed
+                for item in items[:self.max_articles_per_feed]:  # Limit per feed
                     news_item = self._parse_item(item, feed_url)
                     if news_item:
                         news_items.append(news_item)
 
         except httpx.TimeoutException:
-            logger.warning(f"Timeout fetching feed {feed_url} (>{FEED_REQUEST_TIMEOUT}s)")
+            logger.warning(f"Timeout fetching feed {feed_url} (>{HTTP_TIMEOUT_RSS}s)")
         except httpx.HTTPStatusError as e:
             logger.warning(f"HTTP error fetching feed {feed_url}: {e.response.status_code}")
         except Exception as e:

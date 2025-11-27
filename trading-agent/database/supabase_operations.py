@@ -662,58 +662,70 @@ class SupabaseOperations:
 
     def save_news_batch(self, news_items: List[Dict[str, Any]]) -> int:
         """
-        Save multiple news items, avoiding duplicates by URL.
+        Save multiple news items using batch upsert (efficient single query).
+
+        Uses UNIQUE constraint on url for conflict resolution.
 
         Returns:
-            Number of news items saved
+            Number of news items saved/updated
         """
         if not news_items:
             return 0
 
-        saved_count = 0
+        # Prepare all records for batch upsert
+        records = []
         for item in news_items:
-            try:
-                # Check if news already exists by URL
-                url = item.get("url")
-                if url:
-                    existing = self.client.table("trading_news") \
-                        .select("id") \
-                        .eq("url", url) \
-                        .execute()
-
-                    if existing.data:
-                        continue  # Skip duplicate
-
-                # Parse published_at if it's a string
-                published_at = item.get("published_at")
-                if isinstance(published_at, str):
-                    try:
-                        from dateutil import parser
-                        published_at = parser.parse(published_at).isoformat()
-                    except:
-                        published_at = datetime.utcnow().isoformat()
-
-                data = {
-                    "title": item.get("title", "")[:500],
-                    "summary": (item.get("summary") or "")[:1000],
-                    "source": item.get("source", "RSS Feed"),
-                    "url": url,
-                    "published_at": published_at,
-                    "sentiment": item.get("sentiment", "neutral"),
-                    "symbols": item.get("symbols"),
-                    "raw_data": item.get("raw_data")
-                }
-
-                self.client.table("trading_news").insert(data).execute()
-                saved_count += 1
-
-            except Exception as e:
-                logger.debug(f"Error saving news item: {e}")
+            url = item.get("url")
+            if not url:
                 continue
 
-        if saved_count > 0:
-            logger.info(f"Saved {saved_count} news items to database")
-        return saved_count
+            # Parse published_at if it's a string
+            published_at = item.get("published_at")
+            if isinstance(published_at, str):
+                try:
+                    from dateutil import parser
+                    published_at = parser.parse(published_at).isoformat()
+                except Exception:
+                    published_at = datetime.utcnow().isoformat()
+
+            records.append({
+                "title": item.get("title", "")[:500],
+                "summary": (item.get("summary") or "")[:1000],
+                "source": item.get("source", "RSS Feed"),
+                "url": url,
+                "published_at": published_at,
+                "sentiment": item.get("sentiment", "neutral"),
+                "symbols": item.get("symbols"),
+                "raw_data": item.get("raw_data")
+            })
+
+        if not records:
+            return 0
+
+        try:
+            # Single batch upsert - much more efficient than N individual queries
+            result = self.client.table("trading_news") \
+                .upsert(records, on_conflict="url") \
+                .execute()
+
+            saved_count = len(result.data) if result.data else 0
+            if saved_count > 0:
+                logger.info(f"Batch upserted {saved_count} news items to database")
+            return saved_count
+
+        except Exception as e:
+            logger.warning(f"Batch upsert failed, falling back to individual inserts: {e}")
+            # Fallback to individual inserts if batch fails
+            saved_count = 0
+            for record in records:
+                try:
+                    self.client.table("trading_news") \
+                        .upsert(record, on_conflict="url") \
+                        .execute()
+                    saved_count += 1
+                except Exception as inner_e:
+                    logger.debug(f"Error saving news item: {inner_e}")
+            return saved_count
 
     def save_analyzed_news_batch(self, analyzed_items: List[Dict[str, Any]]) -> int:
         """
@@ -1247,6 +1259,56 @@ class SupabaseOperations:
             "trading_fees_total_usd": sum(float(c["cost_usd"]) for c in fee_costs),
             "trades_count": len(fee_costs),
             "total_cost_usd": sum(float(c["cost_usd"]) for c in costs)
+        }
+
+    def get_cost_vs_profit_roi(
+        self,
+        start_date: str,
+        end_date: str = None
+    ) -> Dict[str, Any]:
+        """
+        Calculate ROI comparing costs vs realized profits.
+
+        Args:
+            start_date: Start date (YYYY-MM-DD format)
+            end_date: Optional end date
+
+        Returns:
+            Dictionary with costs, profits, net profit and ROI percentage
+        """
+        # Get total costs for the period
+        cost_totals = self.get_cost_totals(start_date, end_date)
+        total_costs = cost_totals.get('total_cost_usd', 0)
+
+        # Get realized PnL from closed positions
+        query = self.client.table("trading_positions") \
+            .select("realized_pnl, exit_timestamp") \
+            .eq("status", "closed") \
+            .gte("exit_timestamp", f"{start_date}T00:00:00")
+
+        if end_date:
+            query = query.lte("exit_timestamp", f"{end_date}T23:59:59")
+
+        result = query.execute()
+        positions = result.data or []
+
+        # Calculate total realized profit
+        total_profit = sum(float(p.get("realized_pnl") or 0) for p in positions)
+
+        # Calculate net profit and ROI
+        net_profit = total_profit - total_costs
+        roi_pct = ((net_profit / total_costs) * 100) if total_costs > 0 else 0
+
+        return {
+            "total_costs_usd": total_costs,
+            "llm_costs_usd": cost_totals.get('llm_total_usd', 0),
+            "trading_fees_usd": cost_totals.get('trading_fees_total_usd', 0),
+            "realized_profit_usd": total_profit,
+            "net_profit_usd": net_profit,
+            "roi_percentage": roi_pct,
+            "trades_closed": len(positions),
+            "period_start": start_date,
+            "period_end": end_date
         }
 
     def update_decision_llm_cost(
