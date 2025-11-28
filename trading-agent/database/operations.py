@@ -293,6 +293,53 @@ class DatabaseOperations:
             end_date=end_date
         )
 
+    # ============== Settings ==============
+
+    def get_setting(self, key: str) -> Any:
+        """Get a setting value by key."""
+        return supabase_ops.get_setting(key)
+
+    # ============== AI Analysis ==============
+
+    def should_generate_analysis(self, symbol: str) -> bool:
+        """Check if we need to generate new analysis today."""
+        return supabase_ops.should_generate_analysis(symbol)
+
+    def save_ai_analysis(
+        self,
+        symbol: str,
+        summary_text: str,
+        market_outlook: str,
+        confidence_score: float,
+        key_levels: Dict[str, Any] = None,
+        risk_factors: List[str] = None,
+        opportunities: List[str] = None,
+        trend_strength: str = None,
+        momentum: str = None,
+        volatility_level: str = None,
+        indicators_snapshot: Dict[str, Any] = None,
+        news_sentiment_summary: Dict[str, Any] = None
+    ) -> str:
+        """Save daily AI-generated market analysis."""
+        return supabase_ops.save_ai_analysis(
+            symbol=symbol,
+            summary_text=summary_text,
+            market_outlook=market_outlook,
+            confidence_score=confidence_score,
+            key_levels=key_levels,
+            risk_factors=risk_factors,
+            opportunities=opportunities,
+            trend_strength=trend_strength,
+            momentum=momentum,
+            volatility_level=volatility_level,
+            indicators_snapshot=indicators_snapshot,
+            news_sentiment_summary=news_sentiment_summary
+        )
+
+    def get_latest_ai_analysis(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Get the most recent AI analysis for a symbol."""
+        return supabase_ops.get_latest_ai_analysis(symbol)
+
 
 # Global operations instance
 db_ops = DatabaseOperations()
