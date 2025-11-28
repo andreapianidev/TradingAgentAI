@@ -104,15 +104,18 @@ LINEE GUIDA STOP LOSS:
    - Range tipico: 3.5-5.0%
 
 3. Volatilità ALTA (Volatility Ratio > 1.2):
-   - Stop Loss: 1.5-2.5 * ATR%
-   - Mercato agitato: stop loss più stretti per proteggere capitale
-   - Range tipico: 2.0-3.5%
-   - IMPORTANTE: in volatilità estrema (>1.5), considera di NON aprire posizioni se confidenza < 0.75
+   - Stop Loss: 2.0-3.0 * ATR%
+   - Mercato agitato: serve spazio per le normali oscillazioni crypto
+   - Range tipico: 4.0-6.0%
+   - ⚠️  IMPORTANTE: Se ATR% > 5%, usa SL fino a 8% per evitare falsi trigger
+   - NON aprire posizioni se confidenza < 0.75
 
-4. Volatilità ESTREMA (Volatility Ratio > 1.5):
-   - Stop Loss: 1.5-2.0 * ATR%
-   - Range: 1.5-3.0%
-   - Considera HOLD se confidenza < 0.8
+4. Volatilità ESTREMA (Volatility Ratio > 1.5 o ATR% > 6%):
+   - Stop Loss: 2.0-2.5 * ATR%
+   - Range: 6.0-10.0% (le crypto hanno oscillazioni ampie!)
+   - ⚠️  CRITICO: NON aprire posizioni a meno che confidence >= 0.80
+   - Reasoning obbligatorio: "Alta volatilità richiede SL ampio per evitare exit prematuri"
+   - Se ATR% > 8%, EVITA di aprire (troppo rischioso anche con confidence alta)
 
 LINEE GUIDA TAKE PROFIT:
 - Take Profit minimo: 1.5x lo Stop Loss (risk/reward ratio)
@@ -130,11 +133,20 @@ ADATTAMENTO PER MODALITÀ TRADING:
   * Take Profit: più realistico (5-8%)
   * Evita aperture con Volatility Ratio > 1.5 a meno di confidenza > 0.85
 
-LIMITI ASSOLUTI (indipendentemente da ATR):
+LIMITI ASSOLUTI:
 - Stop Loss minimo: 1.5%
-- Stop Loss massimo: 6.0%
+- Stop Loss massimo NORMALE: 6.0%
+- Stop Loss massimo ALTA VOLATILITÀ (ATR% > 5%): 10.0%
+  → Usa SL > 6% SOLO se ATR% > 5% E confidence >= 0.75
+  → Reasoning obbligatorio: "ATR% elevato richiede SL ampio per oscillazioni normali"
 - Take Profit minimo: 3.0%
 - Take Profit massimo: 15.0%
+
+⚠️  REGOLA CRITICA VOLATILITÀ:
+Se ATR% > 5% E vuoi aprire posizione:
+  1. Confidence DEVE essere >= 0.75 (alta volatilità = più rischio)
+  2. Stop Loss DEVE essere >= 6% (dare spazio alle oscillazioni normali)
+  3. Spiega nel reasoning perché il trade vale il rischio nonostante volatilità alta
 
 ESEMPI PRATICI:
 Scenario 1: BTC @ $50,000, ATR = $800 (1.6%), Volatility Ratio = 1.0 (normale)
