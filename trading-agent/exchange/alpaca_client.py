@@ -162,6 +162,134 @@ class AlpacaClient:
         logger.error(error_msg)
         raise Exception(error_msg)
 
+    # ============================================================
+    # ASSET VALIDATION & DISCOVERY
+    # ============================================================
+
+    def validate_symbol(self, symbol: str) -> Dict[str, Any]:
+        """
+        Validate if a symbol is tradable before attempting to trade.
+
+        Args:
+            symbol: Trading symbol (BTC, ETH, AAPL, etc.)
+
+        Returns:
+            Dict with:
+            - valid: bool
+            - tradable: bool
+            - status: str (active/inactive)
+            - asset_class: str (us_equity/crypto)
+            - fractionable: bool
+            - marginable: bool
+            - shortable: bool
+            - error: str (if validation failed)
+        """
+        try:
+            alpaca_symbol = self._get_symbol(symbol)
+            asset = self._retry_request(self.trading_client.get_asset, alpaca_symbol)
+
+            return {
+                "valid": True,
+                "tradable": asset.tradable if hasattr(asset, 'tradable') else False,
+                "status": asset.status if hasattr(asset, 'status') else "unknown",
+                "asset_class": asset.asset_class.value if hasattr(asset, 'asset_class') else "unknown",
+                "fractionable": asset.fractionable if hasattr(asset, 'fractionable') else False,
+                "marginable": asset.marginable if hasattr(asset, 'marginable') else False,
+                "shortable": asset.shortable if hasattr(asset, 'shortable') else False,
+                "error": None
+            }
+        except Exception as e:
+            error_str = str(e).lower()
+            if "not found" in error_str or "does not exist" in error_str:
+                return {
+                    "valid": False,
+                    "tradable": False,
+                    "status": "not_found",
+                    "asset_class": None,
+                    "fractionable": False,
+                    "marginable": False,
+                    "shortable": False,
+                    "error": f"Symbol {symbol} not found on exchange"
+                }
+            else:
+                log_error_with_context(e, "validate_symbol", {"symbol": symbol})
+                return {
+                    "valid": False,
+                    "tradable": False,
+                    "status": "error",
+                    "asset_class": None,
+                    "fractionable": False,
+                    "marginable": False,
+                    "shortable": False,
+                    "error": str(e)
+                }
+
+    def get_tradable_assets(
+        self,
+        asset_class: str = "crypto",
+        status: str = "active"
+    ) -> List[Dict[str, Any]]:
+        """
+        Get list of all tradable assets matching criteria.
+
+        Args:
+            asset_class: Asset class filter ("crypto", "us_equity", etc.)
+            status: Status filter ("active", "inactive")
+
+        Returns:
+            List of asset dicts with symbol, name, tradable, fractionable, etc.
+        """
+        try:
+            from alpaca.trading.requests import GetAssetsRequest
+
+            request = GetAssetsRequest(
+                asset_class=asset_class,
+                status=status
+            )
+
+            assets = self._retry_request(self.trading_client.get_all_assets, request)
+
+            result = []
+            for asset in assets:
+                if hasattr(asset, 'tradable') and asset.tradable:
+                    result.append({
+                        "symbol": asset.symbol,
+                        "name": asset.name if hasattr(asset, 'name') else asset.symbol,
+                        "asset_class": asset.asset_class.value if hasattr(asset, 'asset_class') else asset_class,
+                        "status": asset.status if hasattr(asset, 'status') else status,
+                        "tradable": asset.tradable,
+                        "fractionable": asset.fractionable if hasattr(asset, 'fractionable') else False,
+                        "marginable": asset.marginable if hasattr(asset, 'marginable') else False,
+                        "shortable": asset.shortable if hasattr(asset, 'shortable') else False,
+                        "easy_to_borrow": asset.easy_to_borrow if hasattr(asset, 'easy_to_borrow') else False,
+                    })
+
+            logger.info(f"Found {len(result)} tradable {asset_class} assets")
+            return result
+
+        except Exception as e:
+            log_error_with_context(e, "get_tradable_assets", {"asset_class": asset_class, "status": status})
+            return []
+
+    def get_asset_info(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """
+        Get detailed information about a specific asset.
+
+        Args:
+            symbol: Trading symbol
+
+        Returns:
+            Asset info dict or None if not found
+        """
+        validation = self.validate_symbol(symbol)
+        if validation["valid"]:
+            return validation
+        return None
+
+    # ============================================================
+    # MARKET DATA
+    # ============================================================
+
     def fetch_ticker(self, symbol: str) -> Dict[str, Any]:
         """
         Fetch current ticker data for a symbol.
@@ -410,6 +538,281 @@ class AlpacaClient:
                 "positions": [],
             }
 
+    # ============================================================
+    # ACCOUNT CONFIGURATION
+    # ============================================================
+
+    def get_account_config(self) -> Dict[str, Any]:
+        """
+        Get current account configurations.
+
+        Returns:
+            Dict with:
+            - dtbp_check: Day trade buying power check (ENTRY, EXIT, BOTH)
+            - trade_confirm_email: Trade confirmation emails (all, none)
+            - suspend_trade: Trading suspended
+            - no_shorting: Shorting disabled
+            - fractional_trading: Fractional shares enabled
+            - max_margin_multiplier: Maximum margin multiplier
+        """
+        try:
+            config = self._retry_request(self.trading_client.get_account_configurations)
+
+            return {
+                "dtbp_check": config.dtbp_check.value if hasattr(config, 'dtbp_check') else "unknown",
+                "trade_confirm_email": config.trade_confirm_email.value if hasattr(config, 'trade_confirm_email') else "unknown",
+                "suspend_trade": config.suspend_trade if hasattr(config, 'suspend_trade') else False,
+                "no_shorting": config.no_shorting if hasattr(config, 'no_shorting') else False,
+                "fractional_trading": config.fractional_trading if hasattr(config, 'fractional_trading') else False,
+                "max_margin_multiplier": str(config.max_margin_multiplier) if hasattr(config, 'max_margin_multiplier') else "1",
+                "pdt_check": config.pdt_check.value if hasattr(config, 'pdt_check') else "unknown",
+                "ptp_no_exception_entry": config.ptp_no_exception_entry if hasattr(config, 'ptp_no_exception_entry') else False,
+            }
+
+        except Exception as e:
+            log_error_with_context(e, "get_account_config")
+            return {
+                "dtbp_check": "unknown",
+                "trade_confirm_email": "unknown",
+                "suspend_trade": False,
+                "no_shorting": False,
+                "fractional_trading": False,
+                "max_margin_multiplier": "1",
+                "pdt_check": "unknown",
+                "ptp_no_exception_entry": False,
+            }
+
+    def set_account_config(self, **config_updates) -> bool:
+        """
+        Update account configurations.
+
+        Args:
+            **config_updates: Configuration key-value pairs to update
+                - dtbp_check: "entry", "exit", "both"
+                - trade_confirm_email: "all", "none"
+                - no_shorting: bool
+                - suspend_trade: bool
+
+        Returns:
+            bool: True if update successful
+
+        Example:
+            set_account_config(no_shorting=True, trade_confirm_email="none")
+        """
+        try:
+            from alpaca.trading.requests import PatchAccountConfigurationRequest
+            from alpaca.trading.enums import DTBPCheck, TradeConfirmationEmail
+
+            # Build request with proper enum conversions
+            request_params = {}
+
+            if "dtbp_check" in config_updates:
+                dtbp_val = config_updates["dtbp_check"].upper()
+                if dtbp_val == "ENTRY":
+                    request_params["dtbp_check"] = DTBPCheck.ENTRY
+                elif dtbp_val == "EXIT":
+                    request_params["dtbp_check"] = DTBPCheck.EXIT
+                elif dtbp_val == "BOTH":
+                    request_params["dtbp_check"] = DTBPCheck.BOTH
+
+            if "trade_confirm_email" in config_updates:
+                email_val = config_updates["trade_confirm_email"].upper()
+                if email_val == "ALL":
+                    request_params["trade_confirm_email"] = TradeConfirmationEmail.ALL
+                elif email_val == "NONE":
+                    request_params["trade_confirm_email"] = TradeConfirmationEmail.NONE
+
+            # Boolean configs
+            for key in ["no_shorting", "suspend_trade", "fractional_trading", "ptp_no_exception_entry"]:
+                if key in config_updates:
+                    request_params[key] = config_updates[key]
+
+            if not request_params:
+                logger.warning("No valid configuration updates provided")
+                return False
+
+            request = PatchAccountConfigurationRequest(**request_params)
+            updated_config = self._retry_request(
+                self.trading_client.update_account_configurations,
+                request
+            )
+
+            logger.info(f"Account configuration updated: {request_params}")
+            return True
+
+        except Exception as e:
+            log_error_with_context(e, "set_account_config", {"updates": config_updates})
+            return False
+
+    def is_trading_enabled(self) -> bool:
+        """
+        Check if trading is currently enabled on the account.
+
+        Returns:
+            bool: True if trading is enabled, False if suspended
+        """
+        try:
+            config = self.get_account_config()
+            is_suspended = config.get("suspend_trade", False)
+
+            if is_suspended:
+                logger.warning("⚠️ Trading is suspended on this account")
+                return False
+
+            return True
+
+        except Exception as e:
+            logger.warning(f"Failed to check trading status: {e}. Assuming enabled.")
+            return True  # Fail-safe: assume enabled
+
+    # ============================================================
+    # ACCOUNT ACTIVITIES & TRACKING
+    # ============================================================
+
+    def get_account_activities(
+        self,
+        activity_types: Optional[List[str]] = None,
+        date: Optional[str] = None,
+        until: Optional[str] = None,
+        direction: str = "desc",
+        page_size: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Get account activities (trades, fills, transfers, etc.).
+
+        Args:
+            activity_types: List of activity types ("FILL", "TRANS", "DIV", "ACATS", etc.)
+                           If None, returns all types
+            date: Start date (YYYY-MM-DD format)
+            until: End date (YYYY-MM-DD format)
+            direction: "asc" or "desc" (default: "desc")
+            page_size: Number of results per page (max 100)
+
+        Returns:
+            List of activity dicts with type, date, symbol, qty, price, etc.
+        """
+        try:
+            from alpaca.trading.requests import GetAccountActivitiesRequest
+            from alpaca.trading.enums import ActivityType
+            from datetime import datetime, timedelta
+
+            # Default to last 7 days if no date specified
+            if not date:
+                date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+
+            # Convert activity types to enum if provided
+            enum_types = None
+            if activity_types:
+                enum_types = []
+                for act_type in activity_types:
+                    try:
+                        enum_types.append(ActivityType[act_type.upper()])
+                    except KeyError:
+                        logger.warning(f"Unknown activity type: {act_type}")
+
+            request = GetAccountActivitiesRequest(
+                activity_types=enum_types,
+                date=date,
+                until=until,
+                direction=direction,
+                page_size=page_size
+            )
+
+            activities = self._retry_request(self.trading_client.get_activities, request)
+
+            result = []
+            for activity in activities:
+                activity_dict = {
+                    "id": activity.id if hasattr(activity, 'id') else None,
+                    "activity_type": activity.activity_type.value if hasattr(activity, 'activity_type') else "unknown",
+                    "date": str(activity.transaction_time) if hasattr(activity, 'transaction_time') else str(activity.date) if hasattr(activity, 'date') else None,
+                }
+
+                # Add type-specific fields
+                if hasattr(activity, 'symbol'):
+                    activity_dict["symbol"] = activity.symbol
+                if hasattr(activity, 'qty'):
+                    activity_dict["qty"] = float(activity.qty)
+                if hasattr(activity, 'price'):
+                    activity_dict["price"] = float(activity.price)
+                if hasattr(activity, 'side'):
+                    activity_dict["side"] = activity.side.value if hasattr(activity.side, 'value') else str(activity.side)
+                if hasattr(activity, 'net_amount'):
+                    activity_dict["net_amount"] = float(activity.net_amount)
+                if hasattr(activity, 'status'):
+                    activity_dict["status"] = activity.status.value if hasattr(activity.status, 'value') else str(activity.status)
+
+                result.append(activity_dict)
+
+            logger.info(f"Retrieved {len(result)} account activities")
+            return result
+
+        except Exception as e:
+            log_error_with_context(e, "get_account_activities", {
+                "activity_types": activity_types,
+                "date": date,
+                "until": until
+            })
+            return []
+
+    def get_recent_fills(self, days: int = 7) -> List[Dict[str, Any]]:
+        """
+        Get recent fill activities for performance tracking.
+
+        Args:
+            days: Number of days to look back (default: 7)
+
+        Returns:
+            List of fill activities with symbol, qty, price, side
+        """
+        try:
+            from datetime import datetime, timedelta
+
+            start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+            fills = self.get_account_activities(
+                activity_types=["FILL"],
+                date=start_date,
+                direction="desc"
+            )
+
+            logger.info(f"Retrieved {len(fills)} fills from last {days} days")
+            return fills
+
+        except Exception as e:
+            log_error_with_context(e, "get_recent_fills", {"days": days})
+            return []
+
+    def get_activity_by_id(self, activity_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get details of a specific activity by ID.
+
+        Args:
+            activity_id: Activity ID
+
+        Returns:
+            Activity dict or None if not found
+        """
+        try:
+            # Note: Alpaca SDK doesn't have direct get_activity_by_id in Trading API
+            # We need to fetch activities and filter by ID
+            activities = self.get_account_activities(page_size=100)
+
+            for activity in activities:
+                if activity.get("id") == activity_id:
+                    return activity
+
+            logger.warning(f"Activity {activity_id} not found")
+            return None
+
+        except Exception as e:
+            log_error_with_context(e, "get_activity_by_id", {"activity_id": activity_id})
+            return None
+
+    # ============================================================
+    # POSITION MANAGEMENT
+    # ============================================================
+
     def _fetch_positions_internal(self) -> List[Dict[str, Any]]:
         """Fetch open positions from Alpaca."""
         try:
@@ -544,6 +947,136 @@ class AlpacaClient:
         """
         logger.debug(f"Alpaca does not support leverage. Ignoring leverage={leverage} for {symbol}")
         return True
+
+    # ============================================================
+    # PRE-TRADE VALIDATION
+    # ============================================================
+
+    def validate_trade_preconditions(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float
+    ) -> Dict[str, Any]:
+        """
+        Comprehensive pre-trade validation using all available endpoints.
+        Checks symbol validity, account status, market hours, and balance.
+
+        Args:
+            symbol: Trading symbol
+            side: "buy" or "sell"
+            quantity: Order quantity
+
+        Returns:
+            Dict with:
+            - valid: bool (overall validation result)
+            - checks: Dict[str, bool] (individual check results)
+            - errors: List[str] (any validation errors)
+            - warnings: List[str] (any warnings)
+        """
+        checks = {}
+        errors = []
+        warnings = []
+
+        # 1. Validate symbol exists and is tradable
+        asset_info = self.validate_symbol(symbol)
+        checks["symbol_valid"] = asset_info["valid"]
+        checks["symbol_tradable"] = asset_info["tradable"]
+
+        if not asset_info["valid"]:
+            errors.append(f"Symbol {symbol} not found on exchange")
+        elif not asset_info["tradable"]:
+            errors.append(f"Symbol {symbol} is not tradable (status: {asset_info['status']})")
+
+        # 2. Check if trading is enabled on account
+        trading_enabled = self.is_trading_enabled()
+        checks["trading_enabled"] = trading_enabled
+
+        if not trading_enabled:
+            errors.append("Trading is suspended on this account")
+
+        # 3. Check market hours (only for stocks, crypto trades 24/7)
+        if asset_info.get("asset_class") == "us_equity":
+            market_open = self.is_market_open()
+            checks["market_open"] = market_open
+
+            if not market_open:
+                warnings.append("Market is currently closed - order will queue until open")
+        else:
+            checks["market_open"] = True  # Crypto trades 24/7
+
+        # 4. Check account balance (for buy orders)
+        if side.lower() == "buy":
+            try:
+                account = self._retry_request(self.trading_client.get_account)
+                buying_power = float(account.buying_power)
+                current_price = self.fetch_ticker(symbol).get("price", 0)
+                required_capital = quantity * current_price
+
+                checks["sufficient_balance"] = buying_power >= required_capital
+
+                if buying_power < required_capital:
+                    errors.append(
+                        f"Insufficient buying power: ${buying_power:.2f} < ${required_capital:.2f} required"
+                    )
+                elif buying_power < required_capital * 1.1:  # Less than 10% buffer
+                    warnings.append(
+                        f"Low buying power buffer: ${buying_power:.2f} for ${required_capital:.2f} order"
+                    )
+            except Exception as e:
+                checks["sufficient_balance"] = None
+                warnings.append(f"Could not verify balance: {e}")
+        else:
+            checks["sufficient_balance"] = True  # Not applicable for sell
+
+        # 5. Check for existing position (for sell orders)
+        if side.lower() == "sell":
+            position = self.get_position(symbol)
+            has_position = position is not None
+
+            checks["has_position"] = has_position
+
+            if not has_position:
+                errors.append(f"No open position for {symbol} to sell")
+            elif position and position.get("quantity", 0) < quantity:
+                errors.append(
+                    f"Insufficient position quantity: {position['quantity']:.6f} < {quantity:.6f} to sell"
+                )
+
+        # Overall result
+        valid = len(errors) == 0 and all(
+            check for check in checks.values() if check is not None
+        )
+
+        return {
+            "valid": valid,
+            "checks": checks,
+            "errors": errors,
+            "warnings": warnings
+        }
+
+    def can_trade(self, symbol: str) -> bool:
+        """
+        Quick check if a symbol can be traded right now.
+
+        Args:
+            symbol: Trading symbol
+
+        Returns:
+            bool: True if symbol can be traded
+        """
+        asset_info = self.validate_symbol(symbol)
+        trading_enabled = self.is_trading_enabled()
+
+        return (
+            asset_info["valid"] and
+            asset_info["tradable"] and
+            trading_enabled
+        )
+
+    # ============================================================
+    # ORDER EXECUTION
+    # ============================================================
 
     def open_position(
         self,
@@ -712,6 +1245,109 @@ class AlpacaClient:
         except Exception as e:
             logger.error(f"Error verifying position quantity: {e}")
             return None, f"Failed to verify quantity: {str(e)}"
+
+    def modify_order(
+        self,
+        order_id: str,
+        qty: Optional[float] = None,
+        limit_price: Optional[float] = None,
+        stop_price: Optional[float] = None,
+        trail: Optional[float] = None,
+        time_in_force: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Modify an existing open order instead of cancel+resubmit.
+        More efficient and preserves queue priority.
+
+        Args:
+            order_id: Order ID to modify
+            qty: New quantity (optional)
+            limit_price: New limit price (optional)
+            stop_price: New stop price (optional)
+            trail: New trail amount/percent (optional)
+            time_in_force: New time in force (optional)
+
+        Returns:
+            Dict with:
+            - success: bool
+            - order_id: str
+            - modified_fields: List[str]
+            - error: str (if failed)
+        """
+        try:
+            from alpaca.trading.requests import ReplaceOrderRequest
+            from alpaca.trading.enums import TimeInForce
+
+            # Build replacement request with only provided fields
+            replace_params = {}
+            modified_fields = []
+
+            if qty is not None:
+                replace_params["qty"] = qty
+                modified_fields.append("qty")
+
+            if limit_price is not None:
+                replace_params["limit_price"] = limit_price
+                modified_fields.append("limit_price")
+
+            if stop_price is not None:
+                replace_params["stop_price"] = stop_price
+                modified_fields.append("stop_price")
+
+            if trail is not None:
+                replace_params["trail"] = trail
+                modified_fields.append("trail")
+
+            if time_in_force is not None:
+                # Convert string to enum
+                tif_map = {
+                    "day": TimeInForce.DAY,
+                    "gtc": TimeInForce.GTC,
+                    "ioc": TimeInForce.IOC,
+                    "fok": TimeInForce.FOK,
+                }
+                replace_params["time_in_force"] = tif_map.get(time_in_force.lower(), TimeInForce.GTC)
+                modified_fields.append("time_in_force")
+
+            if not replace_params:
+                logger.warning("No fields provided for order modification")
+                return {
+                    "success": False,
+                    "order_id": order_id,
+                    "modified_fields": [],
+                    "error": "No fields to modify"
+                }
+
+            request = ReplaceOrderRequest(**replace_params)
+
+            # Use replace_order_by_id from Alpaca SDK
+            modified_order = self._retry_request(
+                self.trading_client.replace_order_by_id,
+                order_id,
+                request
+            )
+
+            logger.info(f"✓ Modified order {order_id}: {modified_fields}")
+
+            return {
+                "success": True,
+                "order_id": modified_order.id if hasattr(modified_order, 'id') else order_id,
+                "modified_fields": modified_fields,
+                "status": modified_order.status.value if hasattr(modified_order, 'status') else "unknown",
+                "error": None
+            }
+
+        except Exception as e:
+            log_error_with_context(e, "modify_order", {
+                "order_id": order_id,
+                "modifications": replace_params if 'replace_params' in locals() else {}
+            })
+            return {
+                "success": False,
+                "order_id": order_id,
+                "modified_fields": [],
+                "error": str(e)
+            }
 
     def close_position(self, symbol: str) -> Dict[str, Any]:
         """
@@ -1318,6 +1954,87 @@ class AlpacaClient:
                 "next_close": None,
                 "timestamp": None
             }
+
+    def get_trading_calendar(
+        self,
+        start: Optional[str] = None,
+        end: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get trading calendar with market open/close times.
+
+        Args:
+            start: Start date (YYYY-MM-DD). Defaults to today
+            end: End date (YYYY-MM-DD). Defaults to 30 days from start
+
+        Returns:
+            List of calendar dicts with date, open, close times
+        """
+        try:
+            from alpaca.trading.requests import GetCalendarRequest
+            from datetime import datetime, timedelta
+
+            # Default dates
+            if not start:
+                start = datetime.now().strftime("%Y-%m-%d")
+            if not end:
+                end_date = datetime.strptime(start, "%Y-%m-%d") + timedelta(days=30)
+                end = end_date.strftime("%Y-%m-%d")
+
+            request = GetCalendarRequest(
+                start=start,
+                end=end
+            )
+
+            calendar = self._retry_request(self.trading_client.get_calendar, request)
+
+            result = []
+            for day in calendar:
+                result.append({
+                    "date": str(day.date),
+                    "open": str(day.open) if hasattr(day, 'open') else None,
+                    "close": str(day.close) if hasattr(day, 'close') else None,
+                    "session_open": str(day.session_open) if hasattr(day, 'session_open') else None,
+                    "session_close": str(day.session_close) if hasattr(day, 'session_close') else None,
+                })
+
+            logger.info(f"Retrieved {len(result)} trading days from {start} to {end}")
+            return result
+
+        except Exception as e:
+            log_error_with_context(e, "get_trading_calendar", {"start": start, "end": end})
+            return []
+
+    def is_market_holiday(self, date: Optional[str] = None) -> bool:
+        """
+        Check if a specific date is a market holiday.
+
+        Args:
+            date: Date to check (YYYY-MM-DD). Defaults to today
+
+        Returns:
+            bool: True if market is closed (holiday), False if open
+        """
+        try:
+            from datetime import datetime
+
+            if not date:
+                date = datetime.now().strftime("%Y-%m-%d")
+
+            # Get calendar for just this date
+            calendar = self.get_trading_calendar(start=date, end=date)
+
+            # If no calendar entry, it's a holiday/weekend
+            if not calendar:
+                logger.info(f"Date {date} is a market holiday/weekend")
+                return True
+
+            logger.info(f"Date {date} is a trading day")
+            return False
+
+        except Exception as e:
+            logger.warning(f"Failed to check holiday status for {date}: {e}")
+            return False  # Fail-safe: assume trading day
 
 
 # Global client instance
