@@ -207,6 +207,10 @@ class DatabaseOperations:
             raw_data=raw_data
         )
 
+    def save_news_batch(self, news_items: List[Dict[str, Any]]) -> int:
+        """Save multiple news items in batch."""
+        return supabase_ops.save_news_batch(news_items)
+
     def get_recent_news(
         self,
         symbol: str = None,
@@ -235,6 +239,81 @@ class DatabaseOperations:
     def should_generate_analysis(self, symbol: str) -> bool:
         """Check if we need to generate new AI analysis today."""
         return supabase_ops.should_generate_analysis(symbol)
+
+    def save_ai_analysis(
+        self,
+        symbol: str,
+        analysis_text: str,
+        key_points: List[str] = None,
+        price_targets: Dict[str, Any] = None,
+        risk_assessment: str = None,
+        confidence_score: float = None,
+        raw_data: Dict[str, Any] = None
+    ) -> str:
+        """Save AI-generated market analysis."""
+        return supabase_ops.save_ai_analysis(
+            symbol=symbol,
+            analysis_text=analysis_text,
+            key_points=key_points,
+            price_targets=price_targets,
+            risk_assessment=risk_assessment,
+            confidence_score=confidence_score,
+            raw_data=raw_data
+        )
+
+    # ============== Whale Alerts ==============
+
+    def save_whale_alerts_batch(self, alerts: List[Dict[str, Any]]) -> int:
+        """Save multiple whale alerts in batch."""
+        return supabase_ops.save_whale_alerts_batch(alerts)
+
+    def save_whale_flow_summary(
+        self,
+        symbol: str,
+        total_inflow: float,
+        total_outflow: float,
+        net_flow: float,
+        transaction_count: int,
+        period_start: datetime,
+        period_end: datetime,
+        raw_data: Dict[str, Any] = None
+    ) -> str:
+        """Save whale flow summary."""
+        return supabase_ops.save_whale_flow_summary(
+            symbol=symbol,
+            total_inflow=total_inflow,
+            total_outflow=total_outflow,
+            net_flow=net_flow,
+            transaction_count=transaction_count,
+            period_start=period_start,
+            period_end=period_end,
+            raw_data=raw_data
+        )
+
+    # ============== Market Global ==============
+
+    def save_market_global(self, data: Dict[str, Any]) -> str:
+        """Save global market data."""
+        return supabase_ops.save_market_global(data)
+
+    # ============== Alerts ==============
+
+    def save_alert(
+        self,
+        alert_type: str,
+        severity: str,
+        message: str,
+        symbol: str = None,
+        details: Dict[str, Any] = None
+    ) -> str:
+        """Save system alert."""
+        return supabase_ops.save_alert(
+            alert_type=alert_type,
+            severity=severity,
+            message=message,
+            symbol=symbol,
+            details=details
+        )
 
 
 # Global operations instance
