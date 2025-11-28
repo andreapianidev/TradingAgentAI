@@ -102,6 +102,7 @@ export default function ClosedPositionsHistory({
         .select('*', { count: 'exact' })
         .eq('status', 'closed')
         .not('realized_pnl', 'is', null)
+        .neq('exit_reason', 'DATA_CORRUPT_ZERO_PNL')
 
       // Apply filters
       if (filterSymbol) {
