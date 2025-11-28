@@ -188,7 +188,7 @@ class OrderManager:
         decision: Dict[str, Any],
         context_id: int
     ) -> Dict[str, Any]:
-        """Handle a CLOSE position decision."""
+        """Handle a CLOSE position decision with partial close support."""
         symbol = decision.get("symbol")
 
         # Check if has position to close
@@ -221,6 +221,11 @@ class OrderManager:
         result = self.client.close_position(symbol)
 
         if result.get("success"):
+            # Check if partial close
+            is_partial = result.get("is_partial_close", False)
+            filled_qty = result.get("filled_quantity")
+            expected_qty = result.get("expected_quantity")
+
             # Update trade decision
             db_ops.update_trade_execution(
                 trade_id=trade_id,
@@ -238,11 +243,19 @@ class OrderManager:
                     exit_trade_id=trade_id
                 )
 
+                # Log warning if partial close
+                if is_partial:
+                    logger.warning(
+                        f"PARTIAL CLOSE for {symbol}: "
+                        f"Closed {filled_qty:.8f} of {expected_qty:.8f} expected. "
+                        f"Remaining quantity may still be on exchange."
+                    )
+
             log_execution(
                 symbol=symbol,
-                action="CLOSE",
+                action="CLOSE" if not is_partial else "PARTIAL_CLOSE",
                 price=result.get("exit_price"),
-                quantity=0,  # Already closed
+                quantity=filled_qty or 0,
                 order_id="N/A"
             )
 
@@ -250,7 +263,8 @@ class OrderManager:
                 "success": True,
                 "action": "close",
                 "trade_id": trade_id,
-                "result": result
+                "result": result,
+                "is_partial": is_partial
             }
         else:
             # Update as failed

@@ -659,15 +659,63 @@ class AlpacaClient:
             log_error_with_context(e, "open_position", {"symbol": symbol, "direction": direction})
             return {"success": False, "error": str(e)}
 
+    def _get_actual_position_quantity(self, symbol: str, alpaca_symbol: str) -> tuple:
+        """
+        Get the actual available quantity for a position by checking both
+        Alpaca's current position and comparing against what we expect.
+
+        Returns:
+            Tuple of (available_quantity, warning_message)
+            - available_quantity: The quantity that can actually be closed (None if position not found)
+            - warning_message: Description if quantity mismatch detected (None if all good)
+        """
+        try:
+            # Get fresh position data from Alpaca
+            alpaca_positions = self._retry_request(self.trading_client.get_all_positions)
+            alpaca_position = None
+
+            for pos in alpaca_positions:
+                if pos.symbol == alpaca_symbol:
+                    alpaca_position = pos
+                    break
+
+            if not alpaca_position:
+                return None, f"Position {symbol} not found on Alpaca after order cancellation"
+
+            actual_qty = abs(float(alpaca_position.qty))
+
+            # Get our internal tracking for comparison
+            internal_positions = self._fetch_positions_internal()
+            internal_position = next((p for p in internal_positions if p["symbol"] == symbol), None)
+
+            if internal_position:
+                expected_qty = float(internal_position["quantity"])
+                qty_difference = abs(expected_qty - actual_qty)
+
+                # If there's more than 1% difference, it's likely a partial fill
+                if qty_difference > (expected_qty * 0.01):
+                    warning = (
+                        f"Quantity mismatch for {symbol}: "
+                        f"Expected {expected_qty:.8f}, Alpaca shows {actual_qty:.8f}. "
+                        f"Likely partial fill from SL/TP order (difference: {qty_difference:.8f})"
+                    )
+                    return actual_qty, warning
+
+            return actual_qty, None
+
+        except Exception as e:
+            logger.error(f"Error verifying position quantity: {e}")
+            return None, f"Failed to verify quantity: {str(e)}"
+
     def close_position(self, symbol: str) -> Dict[str, Any]:
         """
-        Close an existing position.
+        Close an existing position with enhanced error handling and partial close fallback.
 
         Args:
             symbol: Trading symbol
 
         Returns:
-            Close execution details
+            Close execution details with actual closed quantity
         """
         try:
             # Get current position from our internal tracking
@@ -680,9 +728,9 @@ class AlpacaClient:
 
             entry_price = position["entry_price"]
             direction = position["direction"]
+            expected_quantity = position["quantity"]
 
             # Get the actual Alpaca position to retrieve the exact symbol format
-            # This is needed because Alpaca uses different symbol formats (e.g., "BTC/USD" for crypto)
             alpaca_positions = self._retry_request(self.trading_client.get_all_positions)
             alpaca_position = None
             for pos in alpaca_positions:
@@ -703,65 +751,121 @@ class AlpacaClient:
 
             # Use the exact symbol format from Alpaca
             alpaca_symbol = alpaca_position.symbol
-            quantity = float(alpaca_position.qty)
 
-            # IMPORTANT: Cancel ALL pending orders FIRST to free up locked balance
-            # This prevents "insufficient balance" errors when closing positions
+            # STEP 1: Cancel ALL pending orders FIRST
             logger.info(f"Cancelling all pending orders for {alpaca_symbol} before close...")
-            cancellation_success = self._cancel_orders_for_symbol(alpaca_symbol)
+            cancellation_result = self._cancel_orders_for_symbol(alpaca_symbol)
 
-            if not cancellation_success:
+            if not cancellation_result["success"]:
                 logger.error(f"Failed to cancel all orders for {alpaca_symbol}, aborting close")
                 return {"success": False, "error": "Failed to cancel pending orders"}
 
-            # Additional wait to ensure balance is fully unlocked
-            logger.info("Waiting 5s for balance to unlock after SL/TP cancellation...")
-            time.sleep(5)
+            # STEP 2: Adaptive wait based on what was cancelled
+            base_wait = 5
+            if cancellation_result["had_sl_tp"]:
+                # SL/TP orders need more time to release balance
+                base_wait = 8
+                logger.info(f"SL/TP orders detected, using extended wait time ({base_wait}s)")
 
-            # Close position using a market order instead of close_position() API
-            # This is more reliable than the close_position() endpoint which has bugs with crypto
+            logger.info(f"Waiting {base_wait}s for balance to unlock after order cancellation...")
+            time.sleep(base_wait)
+
+            # STEP 3: Verify actual available quantity
+            actual_qty, qty_warning = self._get_actual_position_quantity(symbol, alpaca_symbol)
+
+            if actual_qty is None:
+                return {"success": False, "error": qty_warning or "Failed to verify position quantity"}
+
+            if qty_warning:
+                logger.warning(qty_warning)
+
+            # STEP 4: Prepare market order to close
             from alpaca.trading.requests import MarketOrderRequest
             from alpaca.trading.enums import OrderSide, TimeInForce
 
-            # Determine order side (opposite of position direction)
             side = OrderSide.SELL if direction == "long" else OrderSide.BUY
 
-            logger.info(f"Closing {direction} position with market order: {side} {quantity:.8f} {alpaca_symbol}")
-
-            # Create and submit market order to close with retry logic for balance errors
-            close_order = MarketOrderRequest(
-                symbol=alpaca_symbol,
-                qty=abs(quantity),
-                side=side,
-                time_in_force=TimeInForce.GTC
+            logger.info(
+                f"Closing {direction} position: {side} {actual_qty:.8f} {alpaca_symbol} "
+                f"(expected: {expected_quantity:.8f})"
             )
 
-            # Retry up to 3 times if insufficient balance (SL/TP orders may still be releasing)
+            # STEP 5: Submit close order with enhanced retry logic
             max_retries = 3
             order = None
+            final_quantity = actual_qty
+
             for attempt in range(max_retries):
                 try:
+                    close_order = MarketOrderRequest(
+                        symbol=alpaca_symbol,
+                        qty=final_quantity,
+                        side=side,
+                        time_in_force=TimeInForce.GTC
+                    )
+
                     order = self._retry_request(self.trading_client.submit_order, close_order)
+                    logger.info(f"Close order submitted successfully for {final_quantity:.8f} {symbol}")
                     break  # Success - exit retry loop
+
                 except Exception as e:
                     error_str = str(e).lower()
                     is_balance_error = "insufficient balance" in error_str or "balance" in error_str
 
                     if is_balance_error and attempt < max_retries - 1:
-                        wait_time = 3 * (attempt + 1)  # Progressive wait: 3s, 6s, 9s
+                        # Balance still locked - wait longer and try again
+                        wait_time = 4 * (attempt + 1)  # Progressive: 4s, 8s
                         logger.warning(
                             f"Balance still locked (attempt {attempt + 1}/{max_retries}), "
-                            f"waiting {wait_time}s for SL/TP orders to fully release..."
+                            f"waiting {wait_time}s..."
                         )
                         time.sleep(wait_time)
+
+                        # On final retry, try to get fresh quantity in case of partial fill
+                        if attempt == max_retries - 2:
+                            logger.info("Final retry - re-verifying available quantity...")
+                            fresh_qty, fresh_warning = self._get_actual_position_quantity(symbol, alpaca_symbol)
+                            if fresh_qty and fresh_qty < final_quantity:
+                                logger.warning(
+                                    f"Quantity decreased to {fresh_qty:.8f}, adjusting close order"
+                                )
+                                final_quantity = fresh_qty
+
+                    elif is_balance_error:
+                        # Max retries reached with balance error - try partial close
+                        logger.error(
+                            f"Still insufficient balance after {max_retries} attempts. "
+                            f"Attempting graceful degradation..."
+                        )
+
+                        # Try closing 90% of what we think is available
+                        fallback_qty = final_quantity * 0.9
+                        logger.info(f"Attempting partial close of {fallback_qty:.8f} {symbol}")
+
+                        try:
+                            close_order = MarketOrderRequest(
+                                symbol=alpaca_symbol,
+                                qty=fallback_qty,
+                                side=side,
+                                time_in_force=TimeInForce.GTC
+                            )
+                            order = self._retry_request(self.trading_client.submit_order, close_order)
+                            final_quantity = fallback_qty
+                            logger.warning(
+                                f"Partial close successful: {fallback_qty:.8f}/{actual_qty:.8f}"
+                            )
+                            break
+                        except Exception as fallback_error:
+                            logger.error(f"Partial close also failed: {fallback_error}")
+                            raise e  # Raise original error
                     else:
-                        # Re-raise if not a balance error or max retries reached
+                        # Not a balance error or other issue - raise immediately
                         raise
 
             if not order:
-                raise Exception("Failed to close position after max retries")
+                raise Exception("Failed to close position after max retries and fallback")
 
-            # Wait for fill
+            # STEP 6: Wait for fill and get execution details
             time.sleep(2)
             filled_order = self.trading_client.get_order_by_id(order.id)
 
@@ -773,17 +877,24 @@ class AlpacaClient:
                 ticker = self.fetch_ticker(symbol)
                 exit_price = ticker.get("price", entry_price)
 
-            # Calculate P&L
+            # Get actual filled quantity (may differ from requested)
+            filled_qty = float(filled_order.filled_qty) if filled_order.filled_qty else final_quantity
+
+            # Calculate P&L based on actual filled quantity
             if direction == "long":
-                pnl = (exit_price - entry_price) * abs(quantity)
+                pnl = (exit_price - entry_price) * filled_qty
                 pnl_pct = ((exit_price / entry_price) - 1) * 100
             else:
-                pnl = (entry_price - exit_price) * abs(quantity)
+                pnl = (entry_price - exit_price) * filled_qty
                 pnl_pct = ((entry_price / exit_price) - 1) * 100
+
+            # Check if partial close
+            is_partial = abs(filled_qty - expected_quantity) > (expected_quantity * 0.01)
 
             logger.info(
                 f"Closed {direction.upper()} position: {symbol} @ ${exit_price:.2f} "
-                f"| PnL: ${pnl:.2f} ({pnl_pct:.2f}%)"
+                f"| Qty: {filled_qty:.8f} | PnL: ${pnl:.2f} ({pnl_pct:.2f}%)"
+                f"{' [PARTIAL CLOSE]' if is_partial else ''}"
             )
 
             return {
@@ -791,6 +902,9 @@ class AlpacaClient:
                 "exit_price": exit_price,
                 "pnl": pnl,
                 "pnl_pct": pnl_pct,
+                "filled_quantity": filled_qty,
+                "expected_quantity": expected_quantity,
+                "is_partial_close": is_partial,
             }
 
         except Exception as e:
@@ -891,12 +1005,15 @@ class AlpacaClient:
             log_error_with_context(e, "_set_take_profit", {"symbol": symbol, "price": price})
             return None
 
-    def _cancel_orders_for_symbol(self, symbol: str) -> bool:
+    def _cancel_orders_for_symbol(self, symbol: str) -> Dict[str, Any]:
         """
         Cancel all open orders for a symbol and verify cancellation.
 
         Returns:
-            True if all orders cancelled successfully, False otherwise
+            Dict with:
+            - success: bool
+            - orders_cancelled: int (count of cancelled orders)
+            - had_sl_tp: bool (whether SL/TP orders were among them)
         """
         try:
             from alpaca.trading.requests import GetOrdersRequest
@@ -911,14 +1028,24 @@ class AlpacaClient:
 
             if not open_orders:
                 logger.debug(f"No open orders found for {symbol}")
-                return True
+                return {"success": True, "orders_cancelled": 0, "had_sl_tp": False}
 
             cancelled_count = 0
+            had_sl_tp = False
+
             for order in open_orders:
                 try:
                     self.trading_client.cancel_order_by_id(order.id)
                     logger.info(f"Cancelled order {order.id} for {symbol}")
                     cancelled_count += 1
+
+                    # Check if this was a SL or TP order
+                    if hasattr(order, 'order_class') and order.order_class and order.order_class in ['bracket', 'oco']:
+                        had_sl_tp = True
+                    # Also check order type for stop/limit orders
+                    if hasattr(order, 'type') and order.type and order.type in ['stop', 'stop_limit', 'limit']:
+                        had_sl_tp = True
+
                 except Exception as e:
                     logger.warning(f"Failed to cancel order {order.id}: {e}")
 
@@ -932,16 +1059,22 @@ class AlpacaClient:
             )
             remaining_orders = self._retry_request(self.trading_client.get_orders, verify_request)
 
+            success = len(remaining_orders) == 0
+
             if remaining_orders:
                 logger.warning(f"Still have {len(remaining_orders)} open orders for {symbol} after cancellation")
-                return False
 
-            logger.info(f"Successfully cancelled {cancelled_count} orders for {symbol}")
-            return True
+            logger.info(f"Cancelled {cancelled_count} orders for {symbol} (SL/TP: {had_sl_tp})")
+
+            return {
+                "success": success,
+                "orders_cancelled": cancelled_count,
+                "had_sl_tp": had_sl_tp
+            }
 
         except Exception as e:
             log_error_with_context(e, "_cancel_orders_for_symbol", {"symbol": symbol})
-            return False
+            return {"success": False, "orders_cancelled": 0, "had_sl_tp": False}
 
     def get_total_exposure(self) -> float:
         """
