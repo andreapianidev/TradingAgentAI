@@ -1342,6 +1342,33 @@ class SupabaseOperations:
 
         logger.debug(f"Updated decision {decision_id} with LLM cost: ${cost_usd:.6f}")
 
+    # ============== Trading Strategies ==============
+
+    def get_active_strategy(self) -> Optional[Dict[str, Any]]:
+        """
+        Get the currently active trading strategy from the database.
+
+        Returns:
+            Dictionary with strategy data (name, config, etc.) or None if no active strategy
+        """
+        try:
+            result = self.client.table("trading_strategies") \
+                .select("*") \
+                .eq("is_active", True) \
+                .execute()
+
+            if result.data and len(result.data) > 0:
+                strategy = result.data[0]
+                logger.info(f"Loaded active strategy: {strategy['name']}")
+                return strategy
+            else:
+                logger.warning("No active strategy found in database")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error loading active strategy: {e}")
+            return None
+
 
 # Global operations instance
 db_ops = SupabaseOperations()

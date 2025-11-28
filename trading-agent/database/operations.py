@@ -340,6 +340,12 @@ class DatabaseOperations:
         """Get the most recent AI analysis for a symbol."""
         return supabase_ops.get_latest_ai_analysis(symbol)
 
+    # ============== Trading Strategies ==============
+
+    def get_active_strategy(self) -> Optional[Dict[str, Any]]:
+        """Get the currently active trading strategy from the database."""
+        return supabase_ops.get_active_strategy()
+
 
 # Global operations instance
 db_ops = DatabaseOperations()
