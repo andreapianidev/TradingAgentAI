@@ -121,13 +121,14 @@ export default function ConversationsPage() {
       const pairs: ConversationPair[] = []
       const processedIds = new Set<string>()
 
+      // Process requests first to properly match them with responses
       for (const log of data) {
         if (processedIds.has(log.id)) continue
 
         const details = log.details as LLMRequest | LLMResponse | null
 
         if (details?.type === 'llm_request') {
-          // Find matching response (next log with same symbol and type llm_response)
+          // Find matching response (response that comes after request in time)
           const responseLog = data.find(
             l => l.symbol === log.symbol &&
                  !processedIds.has(l.id) &&
@@ -149,8 +150,16 @@ export default function ConversationsPage() {
 
           processedIds.add(log.id)
           if (responseLog) processedIds.add(responseLog.id)
-        } else if (details?.type === 'llm_response' && !processedIds.has(log.id)) {
-          // Orphan response (no matching request found)
+        }
+      }
+
+      // Then process any orphan responses (responses without matching requests)
+      for (const log of data) {
+        if (processedIds.has(log.id)) continue
+
+        const details = log.details as LLMRequest | LLMResponse | null
+
+        if (details?.type === 'llm_response') {
           pairs.push({
             id: log.id,
             symbol: log.symbol || 'Unknown',
