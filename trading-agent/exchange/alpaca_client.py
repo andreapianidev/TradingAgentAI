@@ -575,6 +575,17 @@ class AlpacaClient:
             alpaca_symbol = self._get_symbol(symbol)
             logger.info(f"Opening {direction} position for {symbol} (Alpaca: {alpaca_symbol})")
 
+            # IMPORTANT: Cancel ALL pending orders FIRST to prevent "wash trade" errors
+            # This ensures no opposite side orders exist that would block the new position
+            logger.info(f"Cancelling all pending orders for {alpaca_symbol} before opening position...")
+            cancellation_success = self._cancel_orders_for_symbol(alpaca_symbol)
+
+            if not cancellation_success:
+                logger.warning(f"Failed to cancel all orders for {alpaca_symbol}, proceeding anyway...")
+
+            # Brief wait to ensure orders are fully cancelled
+            time.sleep(1)
+
             # Get current portfolio
             portfolio = self.fetch_portfolio()
             available = portfolio.get("available_balance", 0)

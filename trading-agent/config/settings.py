@@ -113,6 +113,8 @@ class Settings(BaseSettings):
     STOP_LOSS_PCT: float = Field(default=3.0)
     TAKE_PROFIT_PCT: float = Field(default=5.0)
     MIN_CONFIDENCE_THRESHOLD: float = Field(default=0.6)
+    # Auto-close positions at profit threshold (None = disabled)
+    AUTO_CLOSE_AT_PROFIT_PCT: Optional[float] = Field(default=None)
 
     # ============ LOGGING ============
     LOG_LEVEL: str = Field(default="INFO")
