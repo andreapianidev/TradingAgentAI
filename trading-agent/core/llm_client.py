@@ -112,7 +112,7 @@ class DeepSeekClient:
             response = self._call_api(system_prompt, user_prompt)
 
             if response is None:
-                logger.error("No response from DeepSeek API")
+                logger.error(f"❌ No response from DeepSeek API for {symbol}")
                 log_llm_response(symbol, None, None)
                 return self._default_hold_decision(symbol)
 
@@ -124,12 +124,13 @@ class DeepSeekClient:
 
             if decision is None:
                 # Try to correct invalid response
+                logger.warning(f"⚠️  First parse failed for {symbol}, attempting correction...")
                 decision = self._retry_with_correction(
                     system_prompt, user_prompt, response, exchange
                 )
 
             if decision is None:
-                logger.warning("Failed to parse LLM response, defaulting to HOLD")
+                logger.warning(f"❌ Failed to parse LLM response for {symbol}, defaulting to HOLD")
                 return self._default_hold_decision(symbol)
 
             # Log the decision
@@ -144,7 +145,9 @@ class DeepSeekClient:
             return decision
 
         except Exception as e:
-            logger.error(f"Error getting trading decision: {e}")
+            logger.error(f"❌ CRITICAL ERROR in get_trading_decision for {symbol}: {type(e).__name__}: {e}", exc_info=True)
+            from utils.logger import log_error_with_context
+            log_error_with_context(e, "get_trading_decision", {"symbol": symbol})
             return self._default_hold_decision(symbol)
 
     def _call_api(
@@ -365,7 +368,9 @@ class DeepSeekClient:
             return decision
 
         except Exception as e:
-            logger.error(f"Error getting trading decision: {e}")
+            logger.error(f"❌ CRITICAL ERROR in get_trading_decision_with_prompts for {symbol}: {type(e).__name__}: {e}", exc_info=True)
+            from utils.logger import log_error_with_context
+            log_error_with_context(e, "get_trading_decision_with_prompts", {"symbol": symbol})
             return self._default_hold_decision(symbol)
 
     def test_connection(self) -> bool:
