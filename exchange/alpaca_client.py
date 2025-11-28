@@ -659,9 +659,7 @@ class AlpacaClient:
             Close execution details
         """
         try:
-            alpaca_symbol = self._get_symbol(symbol)
-
-            # Get current position
+            # Get current position from our internal tracking
             positions = self._fetch_positions_internal()
             position = next((p for p in positions if p["symbol"] == symbol), None)
 
@@ -672,30 +670,82 @@ class AlpacaClient:
             entry_price = position["entry_price"]
             direction = position["direction"]
 
-            # Close position via API
-            self._retry_request(
-                self.trading_client.close_position,
-                alpaca_symbol
+            # Get the actual Alpaca position to retrieve the exact symbol format
+            # This is needed because Alpaca uses different symbol formats (e.g., "BTC/USD" for crypto)
+            alpaca_positions = self._retry_request(self.trading_client.get_all_positions)
+            alpaca_position = None
+            for pos in alpaca_positions:
+                pos_symbol = pos.symbol
+                # Check if this position matches (crypto uses "/" format)
+                if "/" in pos_symbol:
+                    base_symbol = pos_symbol.split("/")[0]
+                    if base_symbol == symbol:
+                        alpaca_position = pos
+                        break
+                elif pos_symbol == symbol:
+                    alpaca_position = pos
+                    break
+
+            if not alpaca_position:
+                logger.warning(f"Position {symbol} not found on Alpaca (sync issue)")
+                return {"success": False, "error": "Position not found on exchange"}
+
+            # Use the exact symbol format from Alpaca
+            alpaca_symbol = alpaca_position.symbol
+            quantity = float(alpaca_position.qty)
+
+            # IMPORTANT: Cancel ALL pending orders FIRST to free up locked balance
+            # This prevents "insufficient balance" errors when closing positions
+            logger.info(f"Cancelling all pending orders for {alpaca_symbol} before close...")
+            cancellation_success = self._cancel_orders_for_symbol(alpaca_symbol)
+
+            if not cancellation_success:
+                logger.error(f"Failed to cancel all orders for {alpaca_symbol}, aborting close")
+                return {"success": False, "error": "Failed to cancel pending orders"}
+
+            # Additional wait to ensure balance is fully unlocked
+            logger.info("Waiting 2s for balance to unlock...")
+            time.sleep(2)
+
+            # Close position using a market order instead of close_position() API
+            # This is more reliable than the close_position() endpoint which has bugs with crypto
+            from alpaca.trading.requests import MarketOrderRequest
+            from alpaca.trading.enums import OrderSide, TimeInForce
+
+            # Determine order side (opposite of position direction)
+            side = OrderSide.SELL if direction == "long" else OrderSide.BUY
+
+            logger.info(f"Closing {direction} position with market order: {side} {quantity:.8f} {alpaca_symbol}")
+
+            # Create and submit market order to close
+            close_order = MarketOrderRequest(
+                symbol=alpaca_symbol,
+                qty=abs(quantity),
+                side=side,
+                time_in_force=TimeInForce.GTC
             )
 
-            # Wait for close
-            time.sleep(1)
+            order = self._retry_request(self.trading_client.submit_order, close_order)
 
-            # Get exit price from ticker
-            ticker = self.fetch_ticker(symbol)
-            exit_price = ticker.get("price", entry_price)
+            # Wait for fill
+            time.sleep(2)
+            filled_order = self.trading_client.get_order_by_id(order.id)
+
+            # Get exit price from filled order
+            exit_price = float(filled_order.filled_avg_price) if filled_order.filled_avg_price else entry_price
+
+            # Fallback to ticker if order price not available
+            if exit_price == 0:
+                ticker = self.fetch_ticker(symbol)
+                exit_price = ticker.get("price", entry_price)
 
             # Calculate P&L
-            quantity = position["quantity"]
             if direction == "long":
-                pnl = (exit_price - entry_price) * quantity
+                pnl = (exit_price - entry_price) * abs(quantity)
                 pnl_pct = ((exit_price / entry_price) - 1) * 100
             else:
-                pnl = (entry_price - exit_price) * quantity
+                pnl = (entry_price - exit_price) * abs(quantity)
                 pnl_pct = ((entry_price / exit_price) - 1) * 100
-
-            # Cancel any pending orders for this symbol
-            self._cancel_orders_for_symbol(alpaca_symbol)
 
             logger.info(
                 f"Closed {direction.upper()} position: {symbol} @ ${exit_price:.2f} "
@@ -807,8 +857,13 @@ class AlpacaClient:
             log_error_with_context(e, "_set_take_profit", {"symbol": symbol, "price": price})
             return None
 
-    def _cancel_orders_for_symbol(self, symbol: str) -> None:
-        """Cancel all open orders for a symbol."""
+    def _cancel_orders_for_symbol(self, symbol: str) -> bool:
+        """
+        Cancel all open orders for a symbol and verify cancellation.
+
+        Returns:
+            True if all orders cancelled successfully, False otherwise
+        """
         try:
             from alpaca.trading.requests import GetOrdersRequest
             from alpaca.trading.enums import QueryOrderStatus
@@ -820,15 +875,39 @@ class AlpacaClient:
 
             open_orders = self._retry_request(self.trading_client.get_orders, request)
 
+            if not open_orders:
+                logger.debug(f"No open orders found for {symbol}")
+                return True
+
+            cancelled_count = 0
             for order in open_orders:
                 try:
                     self.trading_client.cancel_order_by_id(order.id)
-                    logger.debug(f"Cancelled order {order.id} for {symbol}")
-                except Exception:
-                    pass
+                    logger.info(f"Cancelled order {order.id} for {symbol}")
+                    cancelled_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to cancel order {order.id}: {e}")
+
+            # Wait for cancellations to process
+            time.sleep(2)
+
+            # Verify all orders are cancelled
+            verify_request = GetOrdersRequest(
+                status=QueryOrderStatus.OPEN,
+                symbols=[symbol]
+            )
+            remaining_orders = self._retry_request(self.trading_client.get_orders, verify_request)
+
+            if remaining_orders:
+                logger.warning(f"Still have {len(remaining_orders)} open orders for {symbol} after cancellation")
+                return False
+
+            logger.info(f"Successfully cancelled {cancelled_count} orders for {symbol}")
+            return True
 
         except Exception as e:
             log_error_with_context(e, "_cancel_orders_for_symbol", {"symbol": symbol})
+            return False
 
     def get_total_exposure(self) -> float:
         """
