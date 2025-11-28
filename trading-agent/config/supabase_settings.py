@@ -32,6 +32,7 @@ class SupabaseSettingsLoader:
         'take_profit_pct': 'TAKE_PROFIT_PCT',
         'enable_stop_loss': 'ENABLE_STOP_LOSS',
         'enable_take_profit': 'ENABLE_TAKE_PROFIT',
+        'auto_close_at_profit_pct': 'AUTO_CLOSE_AT_PROFIT_PCT',
     }
 
     def __init__(self):
@@ -63,9 +64,34 @@ class SupabaseSettingsLoader:
 
         return self._client
 
+    def load_active_strategy(self) -> Optional[Dict[str, Any]]:
+        """
+        Load the active trading strategy from trading_strategies table.
+        Returns the active strategy's config or None if not found.
+        """
+        client = self._get_client()
+        if not client:
+            return None
+
+        try:
+            response = client.table('trading_strategies').select('*').eq('is_active', True).execute()
+
+            if response.data and len(response.data) > 0:
+                strategy = response.data[0]
+                logger.info(f"Active strategy loaded: {strategy.get('display_name')} ({strategy.get('name')})")
+                return strategy
+            else:
+                logger.warning("No active strategy found in trading_strategies table")
+                return None
+
+        except Exception as e:
+            logger.error(f"Failed to load active strategy from Supabase: {e}")
+            return None
+
     def load_settings(self) -> Dict[str, Any]:
         """
         Load all settings from Supabase trading_settings table.
+        Then load active strategy and override individual settings with strategy config.
         Returns a dictionary of setting_key -> parsed value.
         """
         if self._initialized:
@@ -96,6 +122,31 @@ class SupabaseSettingsLoader:
                 logger.info(f"Loaded {len(self._settings_cache)} settings from Supabase")
             else:
                 logger.warning("No settings found in trading_settings table")
+
+            # Load active strategy and override settings
+            strategy = self.load_active_strategy()
+            if strategy and strategy.get('config'):
+                config = strategy['config']
+
+                # Map strategy config to settings keys
+                strategy_overrides = {
+                    'max_position_size_pct': config.get('max_position_size_pct'),
+                    'max_total_exposure_pct': config.get('max_total_exposure_pct'),
+                    'stop_loss_pct': config.get('sl_range_max'),  # Use max of range
+                    'take_profit_pct': config.get('tp_range_max'),  # Use max of range
+                    'min_confidence_threshold': config.get('min_confidence_threshold'),
+                }
+
+                # Add auto_close_at_profit_pct if set
+                if config.get('auto_close_at_profit_pct'):
+                    strategy_overrides['auto_close_at_profit_pct'] = config.get('auto_close_at_profit_pct')
+
+                # Override settings cache with strategy values
+                for key, value in strategy_overrides.items():
+                    if value is not None:
+                        self._settings_cache[key] = value
+
+                logger.info(f"Applied strategy '{strategy.get('display_name')}' config overrides: {list(strategy_overrides.keys())}")
 
         except Exception as e:
             logger.error(f"Failed to load settings from Supabase: {e}")

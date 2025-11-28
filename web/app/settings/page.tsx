@@ -171,6 +171,15 @@ export default function SettingsPage() {
   const activateStrategy = async (strategyId: string) => {
     setActivatingStrategy(strategyId)
     setMessage(null)
+
+    // Optimistic UI update: immediately update local state before API call
+    setStrategies(prevStrategies =>
+      prevStrategies.map(s => ({
+        ...s,
+        is_active: s.id === strategyId
+      }))
+    )
+
     try {
       const res = await fetch('/api/strategies/activate', {
         method: 'POST',
@@ -184,13 +193,17 @@ export default function SettingsPage() {
           type: 'success',
           text: `${data.message} The bot will use this strategy on the next cycle.`
         })
-        // Refresh strategies to show updated active state
+        // Refresh strategies to sync with server state
         fetchStrategies()
       } else {
+        // Revert optimistic update on error
+        fetchStrategies()
         setMessage({ type: 'error', text: data.error || 'Failed to activate strategy' })
       }
     } catch (error) {
       console.error('Error activating strategy:', error)
+      // Revert optimistic update on error
+      fetchStrategies()
       setMessage({ type: 'error', text: 'Failed to activate strategy. Please try again.' })
     } finally {
       setActivatingStrategy(null)
