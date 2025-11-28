@@ -682,7 +682,13 @@ class AlpacaClient:
             if not alpaca_position:
                 return None, f"Position {symbol} not found on Alpaca after order cancellation"
 
-            actual_qty = abs(float(alpaca_position.qty))
+            # Use qty_available if present (amount not locked by orders), otherwise fallback to qty
+            if hasattr(alpaca_position, 'qty_available') and alpaca_position.qty_available is not None:
+                actual_qty = abs(float(alpaca_position.qty_available))
+                logger.info(f"Using available quantity for {symbol}: {actual_qty:.8f} (total: {abs(float(alpaca_position.qty)):.8f})")
+            else:
+                actual_qty = abs(float(alpaca_position.qty))
+                logger.warning(f"qty_available not available for {symbol}, using total quantity: {actual_qty:.8f}")
 
             # Get our internal tracking for comparison
             internal_positions = self._fetch_positions_internal()
@@ -761,10 +767,11 @@ class AlpacaClient:
                 return {"success": False, "error": "Failed to cancel pending orders"}
 
             # STEP 2: Adaptive wait based on what was cancelled
-            base_wait = 5
+            # Increased base wait times to handle Alpaca's balance lock delays better
+            base_wait = 10  # Increased from 5s
             if cancellation_result["had_sl_tp"]:
                 # SL/TP orders need more time to release balance
-                base_wait = 8
+                base_wait = 15  # Increased from 8s
                 logger.info(f"SL/TP orders detected, using extended wait time ({base_wait}s)")
 
             logger.info(f"Waiting {base_wait}s for balance to unlock after order cancellation...")

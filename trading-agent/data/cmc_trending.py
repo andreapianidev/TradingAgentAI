@@ -138,8 +138,11 @@ class CMCTrendingCollector:
             self.rate_tracker.record_call(success=False, rate_limited=(e.response.status_code == 429))
             logger.error(f"CMC API error: {e.response.status_code} - {e.response.text}")
 
-            # If trending fails, try fallback
-            if e.response.status_code != 429:  # Don't retry on rate limit
+            # If endpoint not supported (403) or other non-rate-limit errors, use fallback
+            if e.response.status_code in [403, 404]:
+                logger.info("Trending endpoint not available, using fallback listings API")
+                return self._fetch_fallback_trending(limit)
+            elif e.response.status_code != 429:  # Don't retry on rate limit
                 return self._fetch_fallback_trending(limit)
             raise  # Re-raise to trigger retry decorator
 

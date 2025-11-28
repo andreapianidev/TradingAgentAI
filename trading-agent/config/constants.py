@@ -40,9 +40,9 @@ SENTIMENT_NEUTRAL_MAX = 45
 # Above 45 = GREED
 
 # Cache durations (seconds)
-CACHE_SENTIMENT_DURATION = 3600  # 1 hour
-CACHE_NEWS_DURATION = 1800       # 30 minutes
-CACHE_WHALE_DURATION = 900       # 15 minutes
+CACHE_SENTIMENT_DURATION = 86400  # 24 hours (increased to conserve CMC API quota)
+CACHE_NEWS_DURATION = 1800        # 30 minutes
+CACHE_WHALE_DURATION = 900        # 15 minutes
 
 # OHLCV data
 OHLCV_LIMIT = 200  # Number of candles to fetch

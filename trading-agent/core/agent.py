@@ -1078,7 +1078,8 @@ class TradingAgent:
         Returns:
             List of symbols to process (core + opportunistic)
         """
-        from data.cmc_trending import get_trending_coins
+        from data.coingecko import get_trending_coins as get_coingecko_trending
+        from data.cmc_trending import ALPACA_SUPPORTED_CRYPTO  # Import supported symbols list
         from core.crypto_evaluator import evaluate_crypto_opportunity
         from core.portfolio_allocator import calculate_portfolio_allocation
         from database.watchlist_ops import save_to_watchlist, get_active_watchlist, remove_from_watchlist
@@ -1088,15 +1089,24 @@ class TradingAgent:
             # Load active strategy for allocation config
             active_strategy = supabase_settings.load_active_strategy()
 
-            # Step 1: Get trending coins from CMC
-            logger.info("Fetching trending coins from CoinMarketCap...")
-            trending_data = get_trending_coins(
-                limit=settings.TRENDING_FETCH_LIMIT,
-                analyze_top=settings.TRENDING_ANALYZE_TOP
-            )
+            # Step 1: Get trending coins from CoinGecko (FREE, unlimited API)
+            # Switched from CoinMarketCap to conserve paid quota (333 calls/day -> ~0 calls/day)
+            logger.info("Fetching trending coins from CoinGecko (free API)...")
+            coingecko_trending = get_coingecko_trending()
 
-            trending_coins = trending_data.get("trending_coins", [])
-            logger.info(f"Found {len(trending_coins)} Alpaca-supported coins in top {settings.TRENDING_ANALYZE_TOP} trending")
+            # Filter for Alpaca-supported symbols
+            trending_coins = []
+            for coin in coingecko_trending:
+                symbol = coin.get("symbol", "").upper()
+                if symbol in ALPACA_SUPPORTED_CRYPTO:
+                    trending_coins.append({
+                        "symbol": symbol,
+                        "name": coin.get("name", ""),
+                        "rank": coin.get("rank", 0),
+                        "is_alpaca_supported": True
+                    })
+
+            logger.info(f"Found {len(trending_coins)} Alpaca-supported coins in CoinGecko trending")
 
             # Step 2: Evaluate all coins (core + trending)
             # Core symbols are ALWAYS in the watchlist

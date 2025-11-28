@@ -71,10 +71,10 @@ class TechnicalIndicators:
             latest_close = float(self.df["close"].iloc[-1])
 
             # Calculate ATR as percentage of price
-            atr_pct = (atr_14 / latest_close * 100) if atr_14 > 0 and latest_close > 0 else None
+            atr_pct = (atr_14 / latest_close * 100) if (atr_14 is not None and atr_14 > 0 and latest_close > 0) else None
 
             # Calculate volatility ratio (current vs average)
-            volatility_ratio = (atr_14 / atr_30) if atr_14 > 0 and atr_30 > 0 else 1.0
+            volatility_ratio = (atr_14 / atr_30) if (atr_14 is not None and atr_30 is not None and atr_14 > 0 and atr_30 > 0) else 1.0
 
             return {
                 "macd": macd["macd"],
@@ -90,12 +90,12 @@ class TechnicalIndicators:
                 "atr_30": atr_30,
                 "atr_pct": atr_pct,
                 "volatility_ratio": volatility_ratio,
-                # Additional analysis
-                "macd_bullish": macd["macd"] > macd["signal"],
+                # Additional analysis (with None checks to prevent TypeError)
+                "macd_bullish": macd["macd"] > macd["signal"] if macd["macd"] is not None and macd["signal"] is not None else False,
                 "macd_histogram_rising": self._is_histogram_rising(macd),
-                "rsi_overbought": rsi > RSI_OVERBOUGHT,
-                "rsi_oversold": rsi < RSI_OVERSOLD,
-                "price_above_ema20": latest_close > ema20 if ema20 else False,
+                "rsi_overbought": rsi > RSI_OVERBOUGHT if rsi is not None else False,
+                "rsi_oversold": rsi < RSI_OVERSOLD if rsi is not None else False,
+                "price_above_ema20": latest_close > ema20 if ema20 is not None else False,
             }
 
         except Exception as e:

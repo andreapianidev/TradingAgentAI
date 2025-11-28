@@ -184,7 +184,7 @@ class DeepSeekClient:
             return None
 
     def _parse_response(self, response: str) -> Optional[Dict[str, Any]]:
-        """Parse JSON response from LLM."""
+        """Parse JSON response from LLM with improved extraction."""
         try:
             # Try to extract JSON from response
             # Remove any markdown code blocks
@@ -193,18 +193,51 @@ class DeepSeekClient:
             cleaned = re.sub(r'\s*```$', '', cleaned)
             cleaned = re.sub(r'^```\s*', '', cleaned)
 
-            # Try to find JSON in the response
-            json_match = re.search(r'\{[^{}]*\}', cleaned, re.DOTALL)
-            if json_match:
-                cleaned = json_match.group()
+            # Try multiple JSON extraction strategies
+            decision = None
 
-            decision = json.loads(cleaned)
+            # Strategy 1: Try direct JSON parse first (if response is pure JSON)
+            try:
+                decision = json.loads(cleaned)
+                logger.debug("JSON extracted via direct parse")
+            except json.JSONDecodeError:
+                pass
+
+            # Strategy 2: Find outermost JSON object with improved regex
+            if decision is None:
+                # Match balanced braces including nested content
+                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', cleaned, re.DOTALL)
+                if json_match:
+                    try:
+                        decision = json.loads(json_match.group())
+                        logger.debug("JSON extracted via regex match")
+                    except json.JSONDecodeError:
+                        pass
+
+            # Strategy 3: Find first { to last } (most permissive)
+            if decision is None:
+                first_brace = cleaned.find('{')
+                last_brace = cleaned.rfind('}')
+                if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                    try:
+                        decision = json.loads(cleaned[first_brace:last_brace+1])
+                        logger.debug("JSON extracted via brace detection")
+                    except json.JSONDecodeError:
+                        pass
+
+            if decision is None:
+                logger.warning(f"Failed to extract JSON from response: {cleaned[:300]}...")
+                return None
+
+            # Log successful extraction
+            logger.debug(f"Successfully parsed JSON with fields: {list(decision.keys())}")
 
             # Validate required fields
             required_fields = ["action", "symbol", "confidence"]
             for field in required_fields:
                 if field not in decision:
                     logger.warning(f"Missing required field: {field}")
+                    logger.debug(f"Full response: {response[:500]}...")
                     return None
 
             # Validate action

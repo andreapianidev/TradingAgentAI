@@ -216,6 +216,15 @@ class RateLimitTracker:
         if uptime_hours <= 0:
             return False
 
+        # Only warn if we've been running for at least 1 hour
+        # to avoid misleading extrapolations from short uptimes
+        if uptime_hours < 1.0:
+            logger.debug(
+                f"{self.api_name}: {self.total_calls} calls in {uptime_hours*60:.1f} minutes "
+                f"(too early for daily projection)"
+            )
+            return False
+
         # Extrapolate daily usage
         estimated_daily_calls = (self.total_calls / uptime_hours) * 24
 
@@ -224,7 +233,8 @@ class RateLimitTracker:
         if usage_pct >= threshold_pct:
             logger.warning(
                 f"{self.api_name} rate limit: {usage_pct:.1f}% of daily quota "
-                f"({estimated_daily_calls:.0f}/{daily_quota} calls/day)"
+                f"({estimated_daily_calls:.0f}/{daily_quota} calls/day, "
+                f"actual: {self.total_calls} calls in {uptime_hours:.1f}h)"
             )
             return True
 
