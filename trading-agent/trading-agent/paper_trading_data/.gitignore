@@ -1,2 +1,0 @@
-# Ignore paper trading state files (contain virtual positions and balance)
-*.json
