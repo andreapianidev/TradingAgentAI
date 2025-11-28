@@ -318,3 +318,13 @@ class DatabaseOperations:
 
 # Global operations instance
 db_ops = DatabaseOperations()
+
+# ============================================================
+# Transition Operations
+# ============================================================
+
+from database.transition_ops import TransitionOperations
+from database.supabase_operations import get_supabase_client
+
+# Create global transition operations instance
+transition_ops = TransitionOperations(get_supabase_client())

@@ -715,8 +715,8 @@ class AlpacaClient:
                 return {"success": False, "error": "Failed to cancel pending orders"}
 
             # Additional wait to ensure balance is fully unlocked
-            logger.info("Waiting 2s for balance to unlock...")
-            time.sleep(2)
+            logger.info("Waiting 5s for balance to unlock after SL/TP cancellation...")
+            time.sleep(5)
 
             # Close position using a market order instead of close_position() API
             # This is more reliable than the close_position() endpoint which has bugs with crypto
@@ -728,7 +728,7 @@ class AlpacaClient:
 
             logger.info(f"Closing {direction} position with market order: {side} {quantity:.8f} {alpaca_symbol}")
 
-            # Create and submit market order to close
+            # Create and submit market order to close with retry logic for balance errors
             close_order = MarketOrderRequest(
                 symbol=alpaca_symbol,
                 qty=abs(quantity),
@@ -736,7 +736,30 @@ class AlpacaClient:
                 time_in_force=TimeInForce.GTC
             )
 
-            order = self._retry_request(self.trading_client.submit_order, close_order)
+            # Retry up to 3 times if insufficient balance (SL/TP orders may still be releasing)
+            max_retries = 3
+            order = None
+            for attempt in range(max_retries):
+                try:
+                    order = self._retry_request(self.trading_client.submit_order, close_order)
+                    break  # Success - exit retry loop
+                except Exception as e:
+                    error_str = str(e).lower()
+                    is_balance_error = "insufficient balance" in error_str or "balance" in error_str
+
+                    if is_balance_error and attempt < max_retries - 1:
+                        wait_time = 3 * (attempt + 1)  # Progressive wait: 3s, 6s, 9s
+                        logger.warning(
+                            f"Balance still locked (attempt {attempt + 1}/{max_retries}), "
+                            f"waiting {wait_time}s for SL/TP orders to fully release..."
+                        )
+                        time.sleep(wait_time)
+                    else:
+                        # Re-raise if not a balance error or max retries reached
+                        raise
+
+            if not order:
+                raise Exception("Failed to close position after max retries")
 
             # Wait for fill
             time.sleep(2)

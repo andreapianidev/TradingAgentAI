@@ -128,6 +128,14 @@ class Settings(BaseSettings):
     # Auto-close positions at profit threshold (None = disabled)
     AUTO_CLOSE_AT_PROFIT_PCT: Optional[float] = Field(default=None)
 
+    # ============ EXCHANGE TRANSITION ============
+    # Configuration for safe exchange transitions (Alpaca ↔ Hyperliquid)
+    # Can be controlled from Supabase dashboard
+    TRANSITION_STRATEGY: str = Field(default="WAIT_PROFIT")  # IMMEDIATE, PROFITABLE, WAIT_PROFIT, MANUAL
+    TRANSITION_TIMEOUT_HOURS: int = Field(default=72)  # Max hours to wait before emergency close
+    TRANSITION_EMERGENCY_LOSS_PCT: float = Field(default=-10.0)  # Emergency close if total loss exceeds this
+    TRANSITION_SL_TIGHTEN_PCT: float = Field(default=50.0)  # % to tighten SL in PROFITABLE strategy
+
     # ============ LOGGING ============
     LOG_LEVEL: str = Field(default="INFO")
     LOG_FILE: str = Field(default="logs/trading_agent.log")
