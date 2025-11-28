@@ -230,6 +230,12 @@ class DatabaseOperations:
         """Sync positions from Alpaca to database."""
         return supabase_ops.sync_positions_from_alpaca(alpaca_positions)
 
+    # ============== AI Analysis ==============
+
+    def should_generate_analysis(self, symbol: str) -> bool:
+        """Check if we need to generate new AI analysis today."""
+        return supabase_ops.should_generate_analysis(symbol)
+
 
 # Global operations instance
 db_ops = DatabaseOperations()
