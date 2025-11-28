@@ -1189,7 +1189,7 @@ class AlpacaClient:
 
     def get_position(self, symbol: str) -> Optional[Dict[str, Any]]:
         """
-        Get current position for a symbol.
+        Get current position for a symbol using Alpaca's efficient single-position endpoint.
 
         Args:
             symbol: Trading symbol
@@ -1197,12 +1197,127 @@ class AlpacaClient:
         Returns:
             Position data or None
         """
-        positions = self._fetch_positions_internal()
-        return next((p for p in positions if p["symbol"] == symbol), None)
+        try:
+            alpaca_symbol = self._get_symbol(symbol)
+            # Use get_open_position() - more efficient than get_all_positions() for single symbol
+            position = self._retry_request(self.trading_client.get_open_position, alpaca_symbol)
+
+            if position:
+                return {
+                    "symbol": symbol,
+                    "quantity": abs(float(position.qty)),
+                    "entry_price": float(position.avg_entry_price),
+                    "current_price": float(position.current_price) if hasattr(position, 'current_price') else float(position.avg_entry_price),
+                    "direction": "long" if float(position.qty) > 0 else "short",
+                    "unrealized_pl": float(position.unrealized_pl) if hasattr(position, 'unrealized_pl') else 0,
+                    "unrealized_plpc": float(position.unrealized_plpc) if hasattr(position, 'unrealized_plpc') else 0,
+                }
+            return None
+        except Exception as e:
+            # Position not found or other error - return None
+            error_str = str(e).lower()
+            if "not found" in error_str or "does not exist" in error_str:
+                return None
+            # For other errors, fall back to get_all_positions
+            logger.warning(f"get_open_position failed for {symbol}, falling back to get_all_positions: {e}")
+            positions = self._fetch_positions_internal()
+            return next((p for p in positions if p["symbol"] == symbol), None)
 
     def has_open_position(self, symbol: str) -> bool:
         """Check if there's an open position for a symbol."""
         return self.get_position(symbol) is not None
+
+    def emergency_close_all_positions(self, cancel_orders: bool = True) -> Dict[str, Any]:
+        """
+        Emergency shutdown: Close all positions immediately.
+        Uses Alpaca's native close_all_positions() endpoint.
+
+        Args:
+            cancel_orders: Whether to cancel all pending orders first (default: True)
+
+        Returns:
+            Dict with:
+            - success: bool
+            - closed_count: int
+            - errors: List[str]
+        """
+        try:
+            logger.warning("🚨 EMERGENCY SHUTDOWN: Closing all positions...")
+
+            # Use Alpaca's native batch close endpoint
+            responses = self._retry_request(
+                self.trading_client.close_all_positions,
+                cancel_orders=cancel_orders
+            )
+
+            closed_count = 0
+            errors = []
+
+            for response in responses:
+                if hasattr(response, 'status') and response.status in [200, 207]:
+                    closed_count += 1
+                    logger.info(f"✓ Closed position: {response.symbol if hasattr(response, 'symbol') else 'unknown'}")
+                else:
+                    error_msg = f"Failed to close {response.symbol if hasattr(response, 'symbol') else 'unknown'}: {response}"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+
+            logger.warning(f"Emergency shutdown complete: {closed_count} positions closed, {len(errors)} errors")
+
+            return {
+                "success": len(errors) == 0,
+                "closed_count": closed_count,
+                "errors": errors
+            }
+
+        except Exception as e:
+            log_error_with_context(e, "emergency_close_all_positions")
+            return {
+                "success": False,
+                "closed_count": 0,
+                "errors": [str(e)]
+            }
+
+    def is_market_open(self) -> bool:
+        """
+        Check if the market is currently open using Alpaca's clock endpoint.
+
+        Returns:
+            bool: True if market is open, False otherwise
+        """
+        try:
+            clock = self._retry_request(self.trading_client.get_clock)
+            return clock.is_open
+        except Exception as e:
+            logger.warning(f"Failed to get market clock: {e}. Assuming market is open.")
+            return True  # Fail-safe: assume open to not block trading
+
+    def get_market_hours(self) -> Dict[str, Any]:
+        """
+        Get detailed market hours information.
+
+        Returns:
+            Dict with:
+            - is_open: bool
+            - next_open: datetime
+            - next_close: datetime
+        """
+        try:
+            clock = self._retry_request(self.trading_client.get_clock)
+            return {
+                "is_open": clock.is_open,
+                "next_open": clock.next_open,
+                "next_close": clock.next_close,
+                "timestamp": clock.timestamp
+            }
+        except Exception as e:
+            log_error_with_context(e, "get_market_hours")
+            return {
+                "is_open": True,  # Fail-safe
+                "next_open": None,
+                "next_close": None,
+                "timestamp": None
+            }
 
 
 # Global client instance
