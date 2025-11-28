@@ -706,9 +706,7 @@ class AlpacaClient:
             Close execution details
         """
         try:
-            alpaca_symbol = self._get_symbol(symbol)
-
-            # Get current position
+            # Get current position from our internal tracking
             positions = self._fetch_positions_internal()
             position = next((p for p in positions if p["symbol"] == symbol), None)
 
@@ -718,6 +716,29 @@ class AlpacaClient:
 
             entry_price = position["entry_price"]
             direction = position["direction"]
+
+            # Get the actual Alpaca position to retrieve the exact symbol format
+            # This is needed because Alpaca uses different symbol formats (e.g., "BTC/USD" for crypto)
+            alpaca_positions = self._retry_request(self.trading_client.get_all_positions)
+            alpaca_position = None
+            for pos in alpaca_positions:
+                pos_symbol = pos.symbol
+                # Check if this position matches (crypto uses "/" format)
+                if "/" in pos_symbol:
+                    base_symbol = pos_symbol.split("/")[0]
+                    if base_symbol == symbol:
+                        alpaca_position = pos
+                        break
+                elif pos_symbol == symbol:
+                    alpaca_position = pos
+                    break
+
+            if not alpaca_position:
+                logger.warning(f"Position {symbol} not found on Alpaca (sync issue)")
+                return {"success": False, "error": "Position not found on exchange"}
+
+            # Use the exact symbol format from Alpaca
+            alpaca_symbol = alpaca_position.symbol
 
             # Close position via API
             self._retry_request(
