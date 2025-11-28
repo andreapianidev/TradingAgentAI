@@ -127,6 +127,16 @@ class Settings(BaseSettings):
     TAKE_PROFIT_PCT: float = Field(default=5.0)
     MIN_CONFIDENCE_THRESHOLD: float = Field(default=0.6)
 
+    # ============ TRADING STRATEGY (Dynamic from DB) ============
+    # These are loaded from trading_strategies table and override the above
+    STRATEGY_NAME: Optional[str] = Field(default=None)
+    STRATEGY_CONFIG: Optional[dict] = Field(default=None)
+    TP_RANGE_MIN: float = Field(default=5.0)
+    TP_RANGE_MAX: float = Field(default=8.0)
+    SL_RANGE_MIN: float = Field(default=2.0)
+    SL_RANGE_MAX: float = Field(default=4.0)
+    AUTO_CLOSE_AT_PROFIT_PCT: Optional[float] = Field(default=None)
+
     # ============ LOGGING ============
     LOG_LEVEL: str = Field(default="INFO")
     LOG_FILE: str = Field(default="logs/trading_agent.log")
@@ -172,6 +182,43 @@ class Settings(BaseSettings):
             sources[key] = 'supabase'
         return sources
 
+    def load_strategy_from_db(self):
+        """Load active strategy from Supabase and override settings."""
+        try:
+            # Import here to avoid circular dependency
+            from database.supabase_operations import db_ops
+
+            strategy = db_ops.get_active_strategy()
+            if not strategy:
+                logger.warning("No strategy in DB, using hardcoded defaults")
+                return
+
+            config = strategy.get("config", {})
+            self.STRATEGY_NAME = strategy.get("name")
+            self.STRATEGY_CONFIG = config
+
+            # Override settings with strategy config
+            self.MAX_POSITION_SIZE_PCT = config.get("max_position_size_pct", 2.5)
+            self.MAX_TOTAL_EXPOSURE_PCT = config.get("max_total_exposure_pct", 40.0)
+            self.MIN_CONFIDENCE_THRESHOLD = config.get("min_confidence", 0.60)
+
+            # Store TP/SL ranges for LLM prompt
+            self.TP_RANGE_MIN = config.get("tp_range_min", 3.0)
+            self.TP_RANGE_MAX = config.get("tp_range_max", 6.0)
+            self.AUTO_CLOSE_AT_PROFIT_PCT = config.get("auto_close_at_profit_pct")
+            self.SL_RANGE_MIN = config.get("sl_range_min", 1.5)
+            self.SL_RANGE_MAX = config.get("sl_range_max", 3.0)
+
+            logger.info(f"✓ Loaded strategy '{self.STRATEGY_NAME}' from database")
+            logger.info(f"  Position size: {self.MAX_POSITION_SIZE_PCT}%")
+            logger.info(f"  Max exposure: {self.MAX_TOTAL_EXPOSURE_PCT}%")
+            logger.info(f"  TP range: {self.TP_RANGE_MIN}-{self.TP_RANGE_MAX}%")
+            if self.AUTO_CLOSE_AT_PROFIT_PCT:
+                logger.info(f"  Auto-close at: {self.AUTO_CLOSE_AT_PROFIT_PCT}%")
+
+        except Exception as e:
+            logger.warning(f"Failed to load strategy from DB, using defaults: {e}")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
@@ -182,6 +229,9 @@ class Settings(BaseSettings):
 
 # Global settings instance
 settings = Settings()
+
+# Load active trading strategy from database
+settings.load_strategy_from_db()
 
 # Log settings source on module load
 if _supabase_overrides:

@@ -153,6 +153,29 @@ export interface TradingSetting {
   category: string
 }
 
+export interface TradingStrategy {
+  id: string
+  created_at: string
+  updated_at: string
+  name: string
+  display_name: string
+  description?: string
+  is_active: boolean
+  is_default: boolean
+  config: {
+    max_position_size_pct: number
+    max_total_exposure_pct: number
+    tp_range_min: number
+    tp_range_max: number
+    auto_close_at_profit_pct?: number | null
+    sl_range_min: number
+    sl_range_max: number
+    min_confidence: number
+  }
+  activated_at?: string
+  activation_count: number
+}
+
 export interface TradingCycle {
   id: string
   created_at: string

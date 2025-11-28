@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { supabase, TradingSetting } from '@/lib/supabase'
+import { supabase, TradingSetting, TradingStrategy } from '@/lib/supabase'
 import { cn, formatDate } from '@/lib/utils'
+import StrategyBadge from '@/components/StrategyBadge'
 import {
   Settings,
   Save,
@@ -68,12 +69,16 @@ export default function SettingsPage() {
   const [cleanupLoading, setCleanupLoading] = useState(false)
   const [cleanupResults, setCleanupResults] = useState<any>(null)
   const [dbStats, setDbStats] = useState<any>(null)
+  const [strategies, setStrategies] = useState<TradingStrategy[]>([])
+  const [strategiesLoading, setStrategiesLoading] = useState(true)
+  const [activatingStrategy, setActivatingStrategy] = useState<string | null>(null)
 
   useEffect(() => {
     setMounted(true)
     fetchSettings()
     fetchBotStatus()
     fetchDbStats()
+    fetchStrategies()
 
     // Auto-refresh bot status every 30 seconds
     const interval = setInterval(fetchBotStatus, 30000)
@@ -145,6 +150,50 @@ export default function SettingsPage() {
       console.error('Error fetching settings:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchStrategies = async () => {
+    setStrategiesLoading(true)
+    try {
+      const res = await fetch('/api/strategies')
+      const data = await res.json()
+      if (data.success) {
+        setStrategies(data.strategies || [])
+      }
+    } catch (error) {
+      console.error('Error fetching strategies:', error)
+    } finally {
+      setStrategiesLoading(false)
+    }
+  }
+
+  const activateStrategy = async (strategyId: string) => {
+    setActivatingStrategy(strategyId)
+    setMessage(null)
+    try {
+      const res = await fetch('/api/strategies/activate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ strategy_id: strategyId })
+      })
+      const data = await res.json()
+
+      if (data.success) {
+        setMessage({
+          type: 'success',
+          text: `${data.message} The bot will use this strategy on the next cycle.`
+        })
+        // Refresh strategies to show updated active state
+        fetchStrategies()
+      } else {
+        setMessage({ type: 'error', text: data.error || 'Failed to activate strategy' })
+      }
+    } catch (error) {
+      console.error('Error activating strategy:', error)
+      setMessage({ type: 'error', text: 'Failed to activate strategy. Please try again.' })
+    } finally {
+      setActivatingStrategy(null)
     }
   }
 
@@ -387,7 +436,11 @@ export default function SettingsPage() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white title-gradient cursor-default">
             Settings
           </h1>
-          <p className="text-gray-500 dark:text-gray-400">Configure your trading bot parameters</p>
+          <div className="flex items-center gap-3">
+            <p className="text-gray-500 dark:text-gray-400">Configure your trading bot parameters</p>
+            <div className="h-4 w-px bg-gray-300 dark:bg-gray-700" />
+            <StrategyBadge />
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -484,6 +537,136 @@ export default function SettingsPage() {
               )}
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Strategy Selector */}
+      <div className={cn(
+        "card settings-card",
+        mounted && "animate-fade-in-up"
+      )} style={{ animationDelay: '0.15s' }}>
+        <div className="card-header">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-purple-500/10">
+              <Target className="w-5 h-5 text-purple-500 category-icon" />
+            </div>
+            <div>
+              <h2 className="card-title">Trading Strategy</h2>
+              <p className="text-sm text-gray-500 font-normal">Select your preferred trading style and risk profile</p>
+            </div>
+          </div>
+        </div>
+
+        {strategiesLoading ? (
+          <div className="mt-4 flex items-center justify-center py-8">
+            <RefreshCw className="w-6 h-6 animate-spin text-gray-400" />
+          </div>
+        ) : (
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+            {strategies.map((strategy) => {
+              const isActive = strategy.is_active
+              const isActivating = activatingStrategy === strategy.id
+              const config = strategy.config
+
+              return (
+                <button
+                  key={strategy.id}
+                  onClick={() => !isActive && activateStrategy(strategy.id)}
+                  disabled={isActive || isActivating}
+                  className={cn(
+                    "relative text-left p-4 rounded-lg border-2 transition-all duration-300",
+                    "hover:shadow-lg hover:-translate-y-0.5",
+                    isActive
+                      ? "border-green-500 bg-green-500/5 ring-2 ring-green-500/20"
+                      : "border-gray-200 dark:border-gray-700 hover:border-purple-500/50",
+                    isActivating && "opacity-50 cursor-wait",
+                    !isActive && !isActivating && "cursor-pointer"
+                  )}
+                >
+                  {/* Active Badge */}
+                  {isActive && (
+                    <div className="absolute -top-2 -right-2 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1 shadow-lg">
+                      <CheckCircle className="w-3 h-3" />
+                      ACTIVE
+                    </div>
+                  )}
+
+                  {/* Strategy Name */}
+                  <div className="mb-3">
+                    <h3 className={cn(
+                      "text-lg font-bold mb-1",
+                      isActive ? "text-green-600 dark:text-green-400" : "text-gray-900 dark:text-white"
+                    )}>
+                      {strategy.display_name}
+                    </h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {strategy.description}
+                    </p>
+                  </div>
+
+                  {/* Strategy Details */}
+                  <div className="space-y-2 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">Position Size</span>
+                      <span className="font-semibold text-gray-900 dark:text-white">
+                        {config.max_position_size_pct}%
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">Max Exposure</span>
+                      <span className="font-semibold text-gray-900 dark:text-white">
+                        {config.max_total_exposure_pct}%
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">Take Profit</span>
+                      <span className="font-semibold text-green-600 dark:text-green-400">
+                        {config.tp_range_min}-{config.tp_range_max}%
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">Stop Loss</span>
+                      <span className="font-semibold text-red-600 dark:text-red-400">
+                        {config.sl_range_min}-{config.sl_range_max}%
+                      </span>
+                    </div>
+                    {config.auto_close_at_profit_pct && (
+                      <div className="flex items-center justify-between pt-2 border-t border-gray-200 dark:border-gray-700">
+                        <span className="text-gray-600 dark:text-gray-400">Auto-Close</span>
+                        <span className="font-semibold text-purple-600 dark:text-purple-400">
+                          {config.auto_close_at_profit_pct}%
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Activation Count */}
+                  {strategy.activation_count > 0 && (
+                    <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-400">
+                      Activated {strategy.activation_count} time{strategy.activation_count !== 1 ? 's' : ''}
+                    </div>
+                  )}
+
+                  {/* Loading Indicator */}
+                  {isActivating && (
+                    <div className="absolute inset-0 bg-white/80 dark:bg-gray-900/80 rounded-lg flex items-center justify-center">
+                      <RefreshCw className="w-6 h-6 animate-spin text-purple-500" />
+                    </div>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Info Box */}
+        <div className="mt-4 bg-blue-50 dark:bg-blue-500/5 border border-blue-200 dark:border-blue-500/20 rounded-lg p-3">
+          <div className="text-sm text-blue-600 dark:text-blue-300 flex items-start gap-2">
+            <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <div>
+              Click on a strategy to activate it. The bot will automatically use the selected strategy parameters on the next trading cycle (every 15 minutes).
+            </div>
+          </div>
         </div>
       </div>
 

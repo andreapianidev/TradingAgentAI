@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { supabase, TradingMarketContext, TradingAIAnalysis } from '@/lib/supabase'
 import { formatCurrency, formatPercent, formatTimeAgo, cn } from '@/lib/utils'
+import StrategyBadge from '@/components/StrategyBadge'
 import {
   TrendingUp,
   TrendingDown,
@@ -205,7 +206,11 @@ export default function MarketPage() {
             <BarChart2 className="w-7 h-7 text-green-500" />
             Market Analysis
           </h1>
-          <p className="text-gray-400 mt-1">Real-time technical indicators and AI-powered insights</p>
+          <div className="flex items-center gap-3 mt-1">
+            <p className="text-gray-400">Real-time technical indicators and AI-powered insights</p>
+            <div className="h-4 w-px bg-gray-700" />
+            <StrategyBadge />
+          </div>
         </div>
         <div className="flex items-center gap-4">
           {lastUpdate && (

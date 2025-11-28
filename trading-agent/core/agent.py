@@ -85,6 +85,36 @@ class TradingAgent:
             log_error_with_context(e, "TradingAgent.initialize")
             return False
 
+    def _check_auto_close_positions(self, open_positions: List[Dict[str, Any]]) -> List[str]:
+        """
+        Check if any positions should be auto-closed based on profit threshold.
+
+        Args:
+            open_positions: List of currently open positions
+
+        Returns:
+            List of symbols to auto-close
+        """
+        auto_close_pct = settings.AUTO_CLOSE_AT_PROFIT_PCT
+        if not auto_close_pct:
+            return []  # Auto-close disabled
+
+        to_close = []
+        for pos in open_positions:
+            try:
+                unrealized_pnl_pct = float(pos.get("unrealized_pnl_pct", 0))
+                symbol = pos.get("symbol", "")
+
+                if unrealized_pnl_pct >= auto_close_pct:
+                    logger.info(f"🎯 AUTO-CLOSE triggered for {symbol}: "
+                               f"profit {unrealized_pnl_pct:.2f}% >= {auto_close_pct}%")
+                    to_close.append(symbol)
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Error checking auto-close for position: {e}")
+                continue
+
+        return to_close
+
     def run_cycle(self) -> Dict[str, Any]:
         """
         Run a complete trading cycle for all symbols.
@@ -119,6 +149,39 @@ class TradingAgent:
         mode_label = "[PAPER] " if portfolio_manager.is_paper_trading else ""
         logger.info(f"{mode_label}Portfolio: ${portfolio.get('total_equity', 0):.2f} | "
                    f"Exposure: {current_exposure:.1f}%")
+
+        # Check auto-close BEFORE processing symbols
+        auto_close_symbols = self._check_auto_close_positions(open_positions)
+        if auto_close_symbols:
+            logger.info(f"🎯 Auto-closing {len(auto_close_symbols)} position(s) due to profit threshold")
+            for symbol in auto_close_symbols:
+                try:
+                    logger.info(f"Executing auto-close for {symbol}")
+                    close_decision = {
+                        "action": "close",
+                        "symbol": symbol,
+                        "confidence": 1.0,
+                        "reasoning": f"AUTO-CLOSE: Profit reached {settings.AUTO_CLOSE_AT_PROFIT_PCT}%"
+                    }
+                    # Execute the close order
+                    execution_result = order_manager.execute_decision(
+                        decision=close_decision,
+                        context_id=None
+                    )
+
+                    if execution_result.get("success"):
+                        logger.info(f"✓ Auto-closed {symbol} successfully")
+                    else:
+                        logger.warning(f"Failed to auto-close {symbol}: {execution_result.get('result')}")
+
+                except Exception as e:
+                    logger.error(f"Error auto-closing {symbol}: {e}")
+
+            # Refresh portfolio state after auto-closes
+            portfolio = portfolio_manager.get_portfolio_state()
+            open_positions = portfolio.get("positions", [])
+            current_exposure = portfolio.get("exposure_pct", 0)
+            logger.info(f"Portfolio updated after auto-close: Exposure: {current_exposure:.1f}%")
 
         # Get global sentiment, news, whale alerts, and CoinGecko data (shared across symbols)
         sentiment = self._get_sentiment_safe()

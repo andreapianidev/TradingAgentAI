@@ -19,6 +19,7 @@ import RecentTrades from '@/components/RecentTrades'
 import OpenPositions from '@/components/OpenPositions'
 import AlertsPanel from '@/components/AlertsPanel'
 import CostSummaryCard from '@/components/CostSummaryCard'
+import StrategyBadge from '@/components/StrategyBadge'
 
 const SYNC_INTERVAL = 30000 // 30 seconds
 
@@ -168,6 +169,8 @@ export default function Dashboard() {
               ? `Last sync: ${formatTimeAgo(lastSync.toISOString())}`
               : 'Connecting to Alpaca...'}
           </span>
+          <div className="h-4 w-px bg-gray-700" />
+          <StrategyBadge />
         </div>
         <button
           onClick={() => syncPositions(true)}
