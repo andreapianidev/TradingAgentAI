@@ -158,6 +158,7 @@ class DatabaseOperations:
         exposure_pct: float,
         total_pnl: float = None,
         total_pnl_pct: float = None,
+        initial_balance: float = None,
         raw_data: Dict[str, Any] = None
     ) -> str:
         """Save a portfolio snapshot."""
@@ -169,6 +170,7 @@ class DatabaseOperations:
             exposure_pct=exposure_pct,
             total_pnl=total_pnl,
             total_pnl_pct=total_pnl_pct,
+            initial_balance=initial_balance,
             raw_data=raw_data
         )
 

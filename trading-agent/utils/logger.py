@@ -343,14 +343,28 @@ def log_llm_response(
     decision: Dict[str, Any] = None
 ) -> None:
     """Log an LLM response with full details."""
+    # Safe extraction of action
+    action_str = 'parse_error'
+    if decision and isinstance(decision, dict):
+        action_str = decision.get('action', 'N/A')
+
+    # Safe extraction of response preview
+    response_preview = None
+    if response:
+        try:
+            response_preview = str(response)[:2000] if response else None
+        except:
+            response_preview = "[non-serializable response]"
+
     log_with_details(
-        message=f"Received LLM response for {symbol}: {decision.get('action', 'N/A') if decision else 'parse_error'}",
+        message=f"Received LLM response for {symbol}: {action_str}",
         level="INFO",
         component="llm",
         symbol=symbol,
         details={
             "type": "llm_response",
-            "raw_response": response[:2000] if response else None,
-            "parsed_decision": decision
+            "raw_response": response_preview,
+            "action": action_str,
+            "has_decision": decision is not None
         }
     )
