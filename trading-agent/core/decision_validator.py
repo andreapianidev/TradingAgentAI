@@ -178,6 +178,11 @@ class DecisionValidator:
 
         High exposure = more conservative decisions
         """
+        # Never block CLOSE or HOLD actions - we always want to allow exits
+        if decision.get("action") in [ACTION_CLOSE, ACTION_HOLD]:
+            return decision
+
+        # Only adjust OPEN actions
         if decision.get("action") != ACTION_OPEN:
             return decision
 
