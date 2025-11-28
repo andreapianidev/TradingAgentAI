@@ -15,8 +15,7 @@ import {
   X,
   Menu,
   DollarSign,
-  MessageSquare,
-  ArrowLeftRight
+  MessageSquare
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
@@ -26,7 +25,6 @@ const navigation = [
   { name: 'Bot Console', href: '/bot', icon: Terminal },
   { name: 'Conversations', href: '/conversations', icon: MessageSquare },
   { name: 'Trading', href: '/trading', icon: TrendingUp },
-  { name: 'Transitions', href: '/transitions', icon: ArrowLeftRight },
   { name: 'Market Analysis', href: '/market', icon: BarChart3 },
   { name: 'Costs', href: '/costs', icon: DollarSign },
   { name: 'Settings', href: '/settings', icon: Settings },

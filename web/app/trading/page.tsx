@@ -13,11 +13,12 @@ import PositionStatsCards from '@/components/trading/PositionStatsCards'
 import OpenPositionsTable from '@/components/trading/OpenPositionsTable'
 import AIDecisionsTable from '@/components/trading/AIDecisionsTable'
 import AllPositionsTable from '@/components/trading/AllPositionsTable'
+import TransitionsTab from '@/components/trading/TransitionsTab'
 import { useTradingPositions } from '@/lib/hooks/useTradingPositions'
 import { useTradingDecisions } from '@/lib/hooks/useTradingDecisions'
 import { usePortfolioStats } from '@/lib/hooks/usePortfolioStats'
 
-type TabType = 'overview' | 'history' | 'decisions' | 'all'
+type TabType = 'overview' | 'history' | 'decisions' | 'all' | 'transitions'
 
 const INITIAL_CAPITAL = 100000
 
@@ -210,7 +211,8 @@ export default function TradingPage() {
           { id: 'overview' as TabType, label: 'Overview' },
           { id: 'history' as TabType, label: 'Position History' },
           { id: 'decisions' as TabType, label: 'AI Decisions' },
-          { id: 'all' as TabType, label: 'All Positions' }
+          { id: 'all' as TabType, label: 'All Positions' },
+          { id: 'transitions' as TabType, label: 'Transitions' }
         ].map(tab => (
           <button
             key={tab.id}
@@ -383,6 +385,19 @@ export default function TradingPage() {
               onClosePosition={handleClosePosition}
               onRefresh={() => syncPositions(true)}
             />
+          </motion.div>
+        )}
+
+        {/* Transitions Tab */}
+        {activeTab === 'transitions' && (
+          <motion.div
+            key="transitions"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            transition={{ type: "spring", stiffness: 100, damping: 15 }}
+          >
+            <TransitionsTab />
           </motion.div>
         )}
       </AnimatePresence>

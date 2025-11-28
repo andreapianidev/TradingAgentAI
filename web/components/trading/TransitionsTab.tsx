@@ -14,7 +14,7 @@ import {
   XCircle
 } from 'lucide-react'
 
-export default function TransitionsPage() {
+export default function TransitionsTab() {
   const { transition, positions, loading, refresh } = useTransitionData()
   const [cancelling, setCancelling] = useState(false)
   const [approving, setApproving] = useState(false)
@@ -79,15 +79,12 @@ export default function TransitionsPage() {
 
   if (!transition) {
     return (
-      <div className="space-y-6">
-        <h1 className="text-2xl font-bold">Exchange Transition</h1>
-        <div className="card p-8 text-center">
-          <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold mb-2">No Active Transition</h3>
-          <p className="text-gray-500 dark:text-gray-400">
-            Change the exchange setting to initiate a transition.
-          </p>
-        </div>
+      <div className="card p-8 text-center">
+        <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-4" />
+        <h3 className="text-lg font-semibold mb-2">No Active Transition</h3>
+        <p className="text-gray-500 dark:text-gray-400">
+          Change the exchange setting to initiate a transition.
+        </p>
       </div>
     )
   }
@@ -128,19 +125,6 @@ export default function TransitionsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Exchange Transition</h1>
-        <button
-          onClick={refresh}
-          disabled={loading}
-          className="btn btn-secondary flex items-center gap-2"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
-      </div>
-
       {/* Status Card */}
       <div className="card">
         <div className="flex items-start justify-between mb-6">
@@ -278,7 +262,6 @@ export default function TransitionsPage() {
                 {positions.map((pos) => {
                   const pnl = pos.unrealized_pnl || 0
                   const pnlPct = pos.unrealized_pnl_pct || 0
-                  const isProfitable = pnl > 0
 
                   return (
                     <tr key={pos.id} className="border-b border-gray-100 dark:border-gray-800">
