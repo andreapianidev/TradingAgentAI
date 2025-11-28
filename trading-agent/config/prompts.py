@@ -4,8 +4,148 @@ System prompts and templates for the LLM decision maker.
 from config.settings import settings
 
 
-def get_system_prompt() -> str:
+# ═══════════════════════════════════════════════════════
+# EXCHANGE-SPECIFIC LEVERAGE RULES
+# ═══════════════════════════════════════════════════════
+
+ALPACA_LEVERAGE_RULES = """
+IMPORTANTE - EXCHANGE ALPACA:
+Operiamo su Alpaca (paper e live trading). Alpaca crypto NON supporta la leva finanziaria.
+Tutte le operazioni sono eseguite a 1x (spot trading). Il campo "leverage" nel JSON deve essere SEMPRE 1.
+"""
+
+HYPERLIQUID_LEVERAGE_RULES_CONSERVATIVE = """
+═══════════════════════════════════════════════════════
+🚀 EXCHANGE: HYPERLIQUID (Perpetual Futures con Leva)
+═══════════════════════════════════════════════════════
+
+CAPACITÀ LEVA:
+- Exchange: Hyperliquid DEX (perpetual futures)
+- Leva disponibile: 1x - 50x
+- Margin type: Isolated (ogni posizione ha leva indipendente)
+- Asset: BTC/USDC:USDC, ETH/USDC:USDC, SOL/USDC:USDC
+
+⚠️  STRATEGIA LEVA: CONSERVATIVE (massimizza sicurezza)
+
+SELEZIONE LEVA BASATA SU CONFIDENCE (regola primaria):
+├─ Confidence 0.60-0.69 → Leverage 1-2x  (setup debole, usa leva bassa)
+├─ Confidence 0.70-0.79 → Leverage 2-4x  (setup moderato)
+├─ Confidence 0.80-0.89 → Leverage 4-7x  (setup forte)
+└─ Confidence 0.90-1.00 → Leverage 7-10x (setup eccellente, max leva conservative)
+
+LIMITI ASSOLUTI PER SIMBOLO (hard caps per volatilità):
+- BTC: MAX 20x (più stabile)
+- ETH: MAX 15x (volatilità media)
+- SOL: MAX 10x (alta volatilità)
+
+CALCOLO ESPOSIZIONE REALE (CRITICO):
+Esposizione Effettiva = position_size_pct × leverage
+
+LIMITI ESPOSIZIONE TOTALE:
+- Esposizione singola posizione: MAX 25%
+- Esposizione totale portfolio: MAX 50%
+
+STOP LOSS CON LEVA:
+- SL deve essere più tight del normale per proteggere da liquidation
+- Con 5x leva: usa SL 3-4% max (invece di 5%)
+- Con 10x leva: usa SL 2-3% max
+
+DISTANZA DA LIQUIDAZIONE:
+Liquidation Distance = 100% / leverage
+Esempi: 5x → -20%, 10x → -10%
+
+⚠️  REGOLA: SL deve essere 50% più stretto della liquidation distance
+"""
+
+HYPERLIQUID_LEVERAGE_RULES_AGGRESSIVE = """
+═══════════════════════════════════════════════════════
+🚀 EXCHANGE: HYPERLIQUID (Perpetual Futures con Leva)
+═══════════════════════════════════════════════════════
+
+CAPACITÀ LEVA:
+- Exchange: Hyperliquid DEX (perpetual futures)
+- Leva disponibile: 1x - 50x
+- Margin type: Isolated
+- Asset: BTC/USDC:USDC, ETH/USDC:USDC, SOL/USDC:USDC
+
+⚡ STRATEGIA LEVA: AGGRESSIVE (massimizza profitti)
+
+SELEZIONE LEVA BASATA SU CONFIDENCE (regola primaria):
+├─ Confidence 0.60-0.69 → Leverage 2-5x   (setup moderato)
+├─ Confidence 0.70-0.79 → Leverage 5-10x  (setup forte)
+├─ Confidence 0.80-0.89 → Leverage 10-15x (setup eccellente)
+└─ Confidence 0.90-1.00 → Leverage 15-20x (setup perfetto, max leverage)
+
+LIMITI ASSOLUTI PER SIMBOLO:
+- BTC: MAX 30x (più stabile, blue-chip)
+- ETH: MAX 25x (volatilità media, liquido)
+- SOL: MAX 15x (alta volatilità)
+
+RIDUZIONE LEVA PER VOLATILITÀ ALTA:
+Se ATR% > 6%: riduci leverage del 30%
+Se ATR% > 10%: MAX 5x indipendentemente da confidence
+
+CALCOLO ESPOSIZIONE REALE (CRITICO):
+Esposizione Effettiva = position_size_pct × leverage
+
+LIMITI ESPOSIZIONE:
+- Singola posizione: MAX 40%
+- Portfolio totale: MAX 80%
+- Se esposizione > 60%: solo confidence > 0.80
+
+STOP LOSS CON LEVA ALTA:
+- 10x leverage: SL max 3-4%
+- 15x leverage: SL max 2-3%
+- 20x leverage: SL max 1.5-2.5%
+
+DISTANZA DA LIQUIDAZIONE:
+- 10x → liquidazione a -10%
+- 15x → liquidazione a -6.7%
+- 20x → liquidazione a -5%
+
+⚠️  SL deve essere 40-50% della liquidation distance
+
+TAKE PROFIT:
+- 10x: TP 3-5% (= 30-50% profit assoluto)
+- 15x: TP 2-4% (= 30-60% profit assoluto)
+- 20x: TP 2-3% (= 40-60% profit assoluto)
+
+⚠️  SAFETY: Monitor liquidation SEMPRE, de-leverage se mercato gira contro
+"""
+
+
+def _get_leverage_rules(exchange: str) -> str:
+    """
+    Return exchange-specific leverage rules for system prompt.
+
+    Args:
+        exchange: Exchange name ("alpaca" or "hyperliquid")
+
+    Returns:
+        Leverage rules string to inject in system prompt
+    """
+    exchange_lower = exchange.lower()
+
+    if exchange_lower == "alpaca":
+        return ALPACA_LEVERAGE_RULES
+    elif exchange_lower == "hyperliquid":
+        # Check which strategy to use (conservative or aggressive)
+        strategy = getattr(settings, 'LEVERAGE_STRATEGY', 'conservative').lower()
+        if strategy == "aggressive":
+            return HYPERLIQUID_LEVERAGE_RULES_AGGRESSIVE
+        else:
+            return HYPERLIQUID_LEVERAGE_RULES_CONSERVATIVE
+    else:
+        # Default to Alpaca rules for safety
+        return ALPACA_LEVERAGE_RULES
+
+
+def get_system_prompt(exchange: str = "alpaca") -> str:
     """Return the system prompt for the trading LLM."""
+
+    # Get exchange-specific leverage rules
+    leverage_rules = _get_leverage_rules(exchange)
+
     return f"""Sei un trader esperto di criptovalute specializzato in:
 - Analisi tecnica avanzata
 - Gestione del rischio rigorosa
@@ -15,9 +155,7 @@ TUO COMPITO:
 Analizza i dati di mercato forniti e decidi l'azione di trading ottimale.
 Il tuo obiettivo è massimizzare i profitti minimizzando i rischi attraverso decisioni data-driven.
 
-IMPORTANTE - EXCHANGE ALPACA:
-Operiamo su Alpaca (paper e live trading). Alpaca crypto NON supporta la leva finanziaria.
-Tutte le operazioni sono eseguite a 1x (spot trading). Il campo "leverage" nel JSON deve essere SEMPRE 1.
+{leverage_rules}
 
 REGOLE DI TRADING (DA SEGUIRE RIGOROSAMENTE):
 
@@ -169,7 +307,7 @@ Rispondi ESCLUSIVAMENTE con un JSON valido in questo formato esatto:
     "action": "open" | "close" | "hold",
     "symbol": "BTC" | "ETH" | "SOL",
     "direction": "long" | "short" | null,
-    "leverage": 1,
+    "leverage": <valore intero 1-50, rispetta le regole exchange-specific sopra>,
     "position_size_pct": 1.0-5.0,
     "stop_loss_pct": 3.0,
     "take_profit_pct": 5.0,
@@ -180,8 +318,9 @@ Rispondi ESCLUSIVAMENTE con un JSON valido in questo formato esatto:
 REGOLE OUTPUT:
 - NON includere testo prima o dopo il JSON
 - NON usare markdown code blocks
-- "leverage" deve essere SEMPRE 1 (Alpaca non supporta leva)
+- "leverage" deve rispettare le regole exchange-specific definite sopra
 - "reasoning" deve essere esaustivo: spiega quali indicatori hanno pesato di più, perché, e come hai combinato i segnali
+- Se leverage > 1, reasoning DEVE includere: perché hai scelto quel leverage, esposizione reale calcolata, distanza da liquidazione
 - Se action="hold", direction deve essere null
 - Se action="close", direction deve essere null
 - confidence deve riflettere la forza complessiva dei segnali ponderati"""
@@ -199,7 +338,8 @@ def build_user_prompt(
     news: list,
     open_positions: list,
     whale_flow: dict = None,
-    coingecko: dict = None
+    coingecko: dict = None,
+    exchange: str = "alpaca"
 ) -> str:
     """
     Build the user prompt with all market data.
@@ -217,6 +357,7 @@ def build_user_prompt(
         open_positions: Currently open positions
         whale_flow: Whale capital flow analysis
         coingecko: CoinGecko market data (global, trending, coins)
+        exchange: Exchange name ("alpaca" or "hyperliquid")
 
     Returns:
         Formatted user prompt string
@@ -276,7 +417,8 @@ def build_user_prompt(
     return f"""
 === ANALISI PER {symbol} ===
 
-NOTA: Operiamo su Alpaca (spot trading, NO leva). Leverage sempre = 1.
+Exchange: {exchange.upper()}
+Trading Mode: {'PAPER' if portfolio.get('is_paper', True) else 'LIVE'}
 
 📊 PORTFOLIO:
 - Saldo USDC disponibile: ${portfolio.get('available_balance', 0):.2f}
@@ -369,17 +511,17 @@ Dati {symbol} da CoinGecko:
 - Volume 24h: ${cg_volume/1e9:.2f}B
 - Distanza da ATH: {cg_ath_change:.1f}%
 
-Analizza tutti i dati sopra e fornisci la tua decisione di trading in formato JSON.
-RICORDA: leverage deve essere SEMPRE 1 (Alpaca non supporta leva)."""
+Analizza tutti i dati sopra e fornisci la tua decisione di trading in formato JSON."""
 
 
-def get_decision_correction_prompt(error_message: str, original_response: str) -> str:
+def get_decision_correction_prompt(error_message: str, original_response: str, exchange: str = "alpaca") -> str:
     """
     Generate a correction prompt when the LLM response is invalid.
 
     Args:
         error_message: Description of what was wrong
         original_response: The original invalid response
+        exchange: Exchange name ("alpaca" or "hyperliquid")
 
     Returns:
         Correction prompt
@@ -396,7 +538,7 @@ Per favore rispondi nuovamente con SOLO un JSON valido nel formato richiesto:
     "action": "open" | "close" | "hold",
     "symbol": "BTC" | "ETH" | "SOL",
     "direction": "long" | "short" | null,
-    "leverage": 1,
+    "leverage": <rispetta le regole exchange-specific del system prompt>,
     "position_size_pct": 1.0-5.0,
     "stop_loss_pct": 3.0,
     "take_profit_pct": 5.0,
@@ -404,7 +546,6 @@ Per favore rispondi nuovamente con SOLO un JSON valido nel formato richiesto:
     "reasoning": "..."
 }}
 
-IMPORTANTE: leverage deve essere SEMPRE 1 (Alpaca non supporta leva).
 NON includere testo aggiuntivo, SOLO il JSON."""
 
 
@@ -462,7 +603,8 @@ def _get_atr_tp_range(atr_pct: float, volatility_ratio: float) -> str:
 
 def get_system_prompt_for_scenario(
     action_context: str,
-    market_regime: str
+    market_regime: str,
+    exchange: str = "alpaca"
 ) -> str:
     """
     Ritorna prompt specializzato per scenario specifico.
@@ -470,12 +612,13 @@ def get_system_prompt_for_scenario(
     Args:
         action_context: "market_analysis", "close_position", ecc.
         market_regime: "normal", "high_volatility", "trending", "ranging"
+        exchange: Exchange name ("alpaca" or "hyperliquid")
 
     Returns:
         Specialized system prompt
     """
     # Base prompt (sempre incluso)
-    base = get_system_prompt()
+    base = get_system_prompt(exchange=exchange)
 
     # Scenario-specific additions
     scenario_extensions = {
@@ -618,7 +761,8 @@ def build_user_prompt_with_scores(
     coingecko: dict = None,
     weighted_scores: dict = None,      # NUOVO
     news_analysis: dict = None,        # NUOVO
-    data_quality: dict = None          # NUOVO
+    data_quality: dict = None,         # NUOVO
+    exchange: str = "alpaca"           # NUOVO
 ) -> str:
     """
     Build user prompt includendo weighted scores e data quality.
@@ -634,6 +778,7 @@ def build_user_prompt_with_scores(
         weighted_scores: Weighted scores from data_weighting engine
         news_analysis: Advanced news analysis from news_analyzer
         data_quality: Data quality report from data_validator
+        exchange: Exchange name ("alpaca" or "hyperliquid")
 
     Returns:
         Enhanced user prompt string
@@ -642,7 +787,7 @@ def build_user_prompt_with_scores(
     base_prompt = build_user_prompt(
         symbol, portfolio, market_data, indicators,
         pivot_points, forecast, orderbook, sentiment,
-        news, open_positions, whale_flow, coingecko
+        news, open_positions, whale_flow, coingecko, exchange
     )
 
     # Add weighted scores section

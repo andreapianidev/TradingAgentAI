@@ -62,7 +62,8 @@ class DeepSeekClient:
         news: List[Dict[str, Any]],
         open_positions: List[Dict[str, Any]],
         whale_flow: Dict[str, Any] = None,
-        coingecko: Dict[str, Any] = None
+        coingecko: Dict[str, Any] = None,
+        exchange: str = "alpaca"
     ) -> Dict[str, Any]:
         """
         Get trading decision from DeepSeek LLM.
@@ -80,13 +81,14 @@ class DeepSeekClient:
             open_positions: Currently open positions
             whale_flow: Whale capital flow analysis
             coingecko: CoinGecko market data (global, trending, coins)
+            exchange: Exchange name ("alpaca" or "hyperliquid")
 
         Returns:
             Decision dictionary with action, direction, leverage, etc.
         """
         try:
-            # Build prompts
-            system_prompt = get_system_prompt()
+            # Build prompts WITH exchange
+            system_prompt = get_system_prompt(exchange=exchange)
             user_prompt = build_user_prompt(
                 symbol=symbol,
                 portfolio=portfolio,
@@ -99,7 +101,8 @@ class DeepSeekClient:
                 news=news,
                 open_positions=open_positions,
                 whale_flow=whale_flow,
-                coingecko=coingecko
+                coingecko=coingecko,
+                exchange=exchange
             )
 
             # Log the LLM request with prompts
@@ -122,7 +125,7 @@ class DeepSeekClient:
             if decision is None:
                 # Try to correct invalid response
                 decision = self._retry_with_correction(
-                    system_prompt, user_prompt, response
+                    system_prompt, user_prompt, response, exchange
                 )
 
             if decision is None:
@@ -228,13 +231,15 @@ class DeepSeekClient:
         self,
         system_prompt: str,
         original_user_prompt: str,
-        invalid_response: str
+        invalid_response: str,
+        exchange: str = "alpaca"
     ) -> Optional[Dict[str, Any]]:
         """Retry API call with correction prompt."""
         try:
             correction_prompt = get_decision_correction_prompt(
                 "La risposta non era un JSON valido o mancavano campi richiesti",
-                invalid_response
+                invalid_response,
+                exchange
             )
 
             # Combine original prompt with correction
@@ -269,7 +274,8 @@ class DeepSeekClient:
         self,
         system_prompt: str,
         user_prompt: str,
-        symbol: str
+        symbol: str,
+        exchange: str = "alpaca"
     ) -> Dict[str, Any]:
         """
         Get trading decision usando prompts custom (specializzati).
@@ -281,6 +287,7 @@ class DeepSeekClient:
             system_prompt: Custom system prompt
             user_prompt: Custom user prompt
             symbol: Trading symbol (per logging)
+            exchange: Exchange name (alpaca, hyperliquid, etc.)
 
         Returns:
             Decision dictionary
@@ -304,72 +311,9 @@ class DeepSeekClient:
             log_llm_response(symbol, response, decision)
 
             if decision is None:
-                # Retry with correction
+                # Retry with correction using exchange context
                 decision = self._retry_with_correction(
-                    system_prompt, user_prompt, response
-                )
-
-            if decision is None:
-                logger.warning("Failed to parse LLM response, defaulting to HOLD")
-                return self._default_hold_decision(symbol)
-
-            # Log decision
-            log_trade_decision(
-                symbol=decision.get("symbol", symbol),
-                action=decision.get("action", "hold"),
-                direction=decision.get("direction"),
-                confidence=decision.get("confidence", 0),
-                reasoning=decision.get("reasoning", "No reasoning provided")
-            )
-
-            return decision
-
-        except Exception as e:
-            logger.error(f"Error getting trading decision: {e}")
-            return self._default_hold_decision(symbol)
-
-    def get_trading_decision_with_prompts(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        symbol: str
-    ) -> Dict[str, Any]:
-        """
-        Get trading decision usando prompts custom (specializzati).
-
-        Questo metodo permette di usare prompt diversi dal default,
-        ad esempio prompt specializzati per alta volatilità, trending, ecc.
-
-        Args:
-            system_prompt: Custom system prompt
-            user_prompt: Custom user prompt
-            symbol: Trading symbol (per logging)
-
-        Returns:
-            Decision dictionary
-        """
-        try:
-            # Log prompts
-            log_llm_request(symbol, system_prompt, user_prompt)
-
-            # Make API call
-            response = self._call_api(system_prompt, user_prompt)
-
-            if response is None:
-                logger.error("No response from DeepSeek API")
-                log_llm_response(symbol, None, None)
-                return self._default_hold_decision(symbol)
-
-            # Parse response
-            decision = self._parse_response(response)
-
-            # Log response
-            log_llm_response(symbol, response, decision)
-
-            if decision is None:
-                # Retry with correction
-                decision = self._retry_with_correction(
-                    system_prompt, user_prompt, response
+                    system_prompt, user_prompt, response, exchange
                 )
 
             if decision is None:

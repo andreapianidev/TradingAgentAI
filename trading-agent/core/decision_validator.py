@@ -22,6 +22,24 @@ class DecisionValidator:
         self.max_position_size = settings.MAX_POSITION_SIZE_PCT
         self.max_exposure = settings.MAX_TOTAL_EXPOSURE_PCT
         self.min_confidence = settings.MIN_CONFIDENCE_THRESHOLD
+        self.exchange = settings.EXCHANGE
+
+    def _get_symbol_max_leverage(self, symbol: str) -> int:
+        """Get maximum leverage allowed for a specific symbol."""
+        if self.exchange.lower() != "hyperliquid":
+            return 1  # Alpaca and other exchanges: no leverage
+
+        # Symbol-specific caps for Hyperliquid
+        symbol_upper = symbol.upper()
+        if "BTC" in symbol_upper:
+            return settings.MAX_LEVERAGE_BTC
+        elif "ETH" in symbol_upper:
+            return settings.MAX_LEVERAGE_ETH
+        elif "SOL" in symbol_upper:
+            return settings.MAX_LEVERAGE_SOL
+        else:
+            # Default to conservative for unknown symbols
+            return min(10, settings.MAX_LEVERAGE)
 
     def validate(
         self,
@@ -94,35 +112,68 @@ class DecisionValidator:
         # Sanitize and clamp values
         sanitized = self._sanitize_open(decision)
 
-        # Validate exposure
+        # Validate exposure (accounting for leverage)
         new_size = sanitized.get("position_size_pct", 0)
-        new_exposure = current_exposure + new_size
+        new_leverage = sanitized.get("leverage", 1)
 
-        if new_exposure > self.max_exposure:
+        # Real exposure = position_size_pct × leverage
+        effective_exposure = new_size * new_leverage
+        new_total_exposure = current_exposure + effective_exposure
+
+        if new_total_exposure > self.max_exposure:
             logger.warning(
-                f"Would exceed max exposure: {new_exposure:.1f}% > {self.max_exposure}%"
+                f"Would exceed max exposure: {new_total_exposure:.1f}% > {self.max_exposure}% "
+                f"(size={new_size}% × leverage={new_leverage}x = {effective_exposure:.1f}%)"
             )
             # Reduce position size to fit
-            max_allowed = self.max_exposure - current_exposure
-            if max_allowed < 1.0:  # Minimum 1%
+            max_allowed_exposure = self.max_exposure - current_exposure
+            max_allowed_size = max_allowed_exposure / new_leverage if new_leverage > 0 else 0
+
+            if max_allowed_size < 1.0:  # Minimum 1%
                 return False, self._convert_to_hold(decision), "Exposure limit reached"
 
-            sanitized["position_size_pct"] = max(1.0, min(max_allowed, new_size))
-            logger.info(f"Reduced position size to {sanitized['position_size_pct']:.1f}%")
+            sanitized["position_size_pct"] = max(1.0, min(max_allowed_size, new_size))
+            logger.info(
+                f"Reduced position size to {sanitized['position_size_pct']:.1f}% "
+                f"(effective exposure: {sanitized['position_size_pct'] * new_leverage:.1f}%)"
+            )
 
         return True, sanitized, "Valid open"
 
     def _sanitize_open(self, decision: Dict[str, Any]) -> Dict[str, Any]:
-        """Sanitize OPEN decision values."""
+        """Sanitize OPEN decision values (exchange-aware)."""
         sanitized = decision.copy()
+        symbol = decision.get("symbol", "")
 
-        # Force leverage to 1 - Alpaca crypto does not support leverage
-        # LLM may suggest leverage > 1, but we ignore it completely
+        # Exchange-aware leverage validation
         leverage = decision.get("leverage", 1)
-        sanitized["leverage"] = 1  # Always force to 1x for Alpaca crypto
+        symbol_max = self._get_symbol_max_leverage(symbol)
 
-        if leverage != 1:
-            logger.info(f"Forced leverage from {leverage}x to 1x (Alpaca crypto does not support leverage)")
+        if self.exchange.lower() == "alpaca":
+            # Alpaca: force to 1x (no leverage support)
+            sanitized["leverage"] = 1
+            if leverage != 1:
+                logger.info(f"Forced leverage from {leverage}x to 1x (Alpaca does not support leverage)")
+
+        elif self.exchange.lower() == "hyperliquid":
+            # Hyperliquid: validate and clamp leverage
+            leverage_int = int(max(1, min(symbol_max, leverage)))
+
+            # Apply symbol-specific cap
+            if leverage_int > symbol_max:
+                logger.info(f"Clamped leverage from {leverage}x to {symbol_max}x (symbol cap for {symbol})")
+
+            # Apply overall max leverage
+            if leverage_int > self.max_leverage:
+                leverage_int = self.max_leverage
+                logger.info(f"Clamped leverage to {self.max_leverage}x (global max)")
+
+            sanitized["leverage"] = leverage_int
+
+        else:
+            # Unknown exchange: default to 1x for safety
+            sanitized["leverage"] = 1
+            logger.warning(f"Unknown exchange '{self.exchange}', forcing leverage to 1x")
 
         # Clamp position size
         size = decision.get("position_size_pct", 2.0)
@@ -204,9 +255,12 @@ class DecisionValidator:
                 2.0  # Max 2% when exposure is high
             )
 
-        # Leverage is always 1x for Alpaca crypto (no leverage support)
-        # Keep this line for safety even though _sanitize_open already forces it
-        adjusted["leverage"] = 1
+            # For Hyperliquid, also consider reducing leverage in high exposure
+            if self.exchange.lower() == "hyperliquid":
+                current_leverage = adjusted.get("leverage", 1)
+                if current_leverage > 5:
+                    adjusted["leverage"] = 5
+                    logger.info(f"Reduced leverage to 5x due to high exposure ({current_exposure:.1f}%)")
 
         return adjusted
 

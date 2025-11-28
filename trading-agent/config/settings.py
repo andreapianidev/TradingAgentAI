@@ -69,10 +69,21 @@ class Settings(BaseSettings):
     # These can be overridden from Supabase
     TARGET_SYMBOLS: str = Field(default="BTC,ETH,SOL")
     TIMEFRAME: str = Field(default="15m")
-    # NOTE: Alpaca crypto does NOT support leverage. These are kept for compatibility
-    # but are always forced to 1 in the DecisionValidator when using Alpaca.
-    MAX_LEVERAGE: int = Field(default=1)  # Always 1 for Alpaca crypto
-    DEFAULT_LEVERAGE: int = Field(default=1)  # Always 1 for Alpaca crypto
+
+    # ============ LEVERAGE SETTINGS ============
+    # Exchange-aware leverage configuration
+    # - Alpaca: Always 1x (spot trading only)
+    # - Hyperliquid: 1x-50x (perpetual futures with isolated margin)
+    LEVERAGE_STRATEGY: str = Field(default="aggressive")  # "conservative" or "aggressive"
+    MAX_LEVERAGE: int = Field(default=30)  # Overall max leverage cap
+    DEFAULT_LEVERAGE: int = Field(default=5)  # Safe starting point
+
+    # Symbol-specific leverage caps (Hyperliquid only)
+    MAX_LEVERAGE_BTC: int = Field(default=30)  # BTC max leverage (most stable)
+    MAX_LEVERAGE_ETH: int = Field(default=25)  # ETH max leverage (medium volatility)
+    MAX_LEVERAGE_SOL: int = Field(default=15)  # SOL max leverage (high volatility)
+
+    # Position sizing
     MAX_POSITION_SIZE_PCT: float = Field(default=5.0)
     MAX_TOTAL_EXPOSURE_PCT: float = Field(default=30.0)
 

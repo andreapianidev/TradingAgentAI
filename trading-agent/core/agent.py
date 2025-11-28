@@ -712,10 +712,11 @@ class TradingAgent:
         # 11. Get LLM decision with enhanced prompts
         logger.info("Requesting LLM decision with specialized prompts...")
 
-        # Add is_paper flag to portfolio dict for AI to know trading mode
+        # Add is_paper flag and exchange to portfolio dict for AI to know trading mode
         portfolio_with_mode = {
             **portfolio,
-            'is_paper': portfolio_manager.is_paper_trading
+            'is_paper': portfolio_manager.is_paper_trading,
+            'exchange': settings.EXCHANGE
         }
 
         # Determine action context
@@ -724,7 +725,11 @@ class TradingAgent:
         # Get specialized prompt
         from config.prompts import get_system_prompt_for_scenario, build_user_prompt_with_scores
 
-        system_prompt = get_system_prompt_for_scenario(action_context, market_regime)
+        system_prompt = get_system_prompt_for_scenario(
+            action_context,
+            market_regime,
+            exchange=settings.EXCHANGE
+        )
         user_prompt = build_user_prompt_with_scores(
             symbol=symbol,
             portfolio=portfolio_with_mode,
@@ -740,14 +745,16 @@ class TradingAgent:
             coingecko=coingecko,
             weighted_scores=weighted_scores,      # NUOVO
             news_analysis=news_analysis,          # NUOVO
-            data_quality=data_quality             # NUOVO
+            data_quality=data_quality,            # NUOVO
+            exchange=settings.EXCHANGE            # EXCHANGE-AWARE
         )
 
         # Call LLM with specialized prompts
         decision = llm_client.get_trading_decision_with_prompts(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            symbol=symbol
+            symbol=symbol,
+            exchange=settings.EXCHANGE
         )
 
         action = decision.get("action", ACTION_HOLD)
