@@ -786,6 +786,33 @@ class AlpacaClient:
             if qty_warning:
                 logger.warning(qty_warning)
 
+            # Handle case where quantity is fully locked (qty_available = 0)
+            if actual_qty == 0:
+                # Position exists but qty_available is 0 - likely still locked despite cancellation
+                total_qty = abs(float(alpaca_position.qty))
+                logger.warning(
+                    f"Position {symbol} has qty_available=0 but total qty={total_qty:.8f}. "
+                    f"Position may still be locked. Waiting additional 5s and retrying..."
+                )
+                time.sleep(5)
+
+                # Re-check quantity after additional wait
+                actual_qty, qty_warning = self._get_actual_position_quantity(symbol, alpaca_symbol)
+
+                if actual_qty == 0:
+                    # Still locked - use total quantity as last resort
+                    logger.error(
+                        f"Position {symbol} still showing qty_available=0 after extended wait. "
+                        f"Attempting to close using total quantity {total_qty:.8f}"
+                    )
+                    actual_qty = total_qty
+
+                    if actual_qty == 0:
+                        return {
+                            "success": False,
+                            "error": f"Position {symbol} has zero quantity on exchange"
+                        }
+
             # STEP 4: Prepare market order to close
             from alpaca.trading.requests import MarketOrderRequest
             from alpaca.trading.enums import OrderSide, TimeInForce
@@ -818,6 +845,25 @@ class AlpacaClient:
                 except Exception as e:
                     error_str = str(e).lower()
                     is_balance_error = "insufficient balance" in error_str or "balance" in error_str
+                    is_qty_error = "qty must be" in error_str or "quantity" in error_str
+
+                    # Handle zero quantity error specially
+                    if is_qty_error and "must be" in error_str and attempt < max_retries - 1:
+                        logger.warning(
+                            f"Quantity validation error (attempt {attempt + 1}/{max_retries}): {e}. "
+                            f"Position may still be locked, waiting 5s and re-verifying..."
+                        )
+                        time.sleep(5)
+
+                        # Re-verify quantity
+                        fresh_qty, _ = self._get_actual_position_quantity(symbol, alpaca_symbol)
+                        if fresh_qty and fresh_qty > 0:
+                            logger.info(f"Quantity now available: {fresh_qty:.8f}, retrying close...")
+                            final_quantity = fresh_qty
+                            continue
+                        else:
+                            logger.error(f"Position still has zero available quantity after wait")
+                            raise
 
                     if is_balance_error and attempt < max_retries - 1:
                         # Balance still locked - wait longer and try again
