@@ -344,7 +344,7 @@ class DeepSeekClient:
     def test_connection(self) -> bool:
         """Test API connection."""
         try:
-            response = self._call_api(
+            response, usage = self._call_api(
                 "You are a helpful assistant.",
                 "Say 'OK' if you can hear me."
             )
