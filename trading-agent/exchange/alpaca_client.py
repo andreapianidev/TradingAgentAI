@@ -739,31 +739,53 @@ class AlpacaClient:
 
             # Use the exact symbol format from Alpaca
             alpaca_symbol = alpaca_position.symbol
+            quantity = float(alpaca_position.qty)
 
-            # Close position via API
-            self._retry_request(
-                self.trading_client.close_position,
-                alpaca_symbol
+            # IMPORTANT: Cancel ALL pending orders FIRST to free up locked balance
+            # This prevents "insufficient balance" errors when closing positions
+            logger.info(f"Cancelling all pending orders for {alpaca_symbol} before close...")
+            self._cancel_orders_for_symbol(alpaca_symbol)
+            time.sleep(0.5)  # Brief pause to ensure orders are cancelled
+
+            # Close position using a market order instead of close_position() API
+            # This is more reliable than the close_position() endpoint which has bugs with crypto
+            from alpaca.trading.requests import MarketOrderRequest
+            from alpaca.trading.enums import OrderSide, TimeInForce
+
+            # Determine order side (opposite of position direction)
+            side = OrderSide.SELL if direction == "long" else OrderSide.BUY
+
+            logger.info(f"Closing {direction} position with market order: {side} {quantity:.8f} {alpaca_symbol}")
+
+            # Create and submit market order to close
+            close_order = MarketOrderRequest(
+                symbol=alpaca_symbol,
+                qty=abs(quantity),
+                side=side,
+                time_in_force=TimeInForce.GTC
             )
 
-            # Wait for close
-            time.sleep(1)
+            order = self._retry_request(self.trading_client.submit_order, close_order)
 
-            # Get exit price from ticker
-            ticker = self.fetch_ticker(symbol)
-            exit_price = ticker.get("price", entry_price)
+            # Wait for fill
+            time.sleep(2)
+            filled_order = self.trading_client.get_order_by_id(order.id)
+
+            # Get exit price from filled order
+            exit_price = float(filled_order.filled_avg_price) if filled_order.filled_avg_price else entry_price
+
+            # Fallback to ticker if order price not available
+            if exit_price == 0:
+                ticker = self.fetch_ticker(symbol)
+                exit_price = ticker.get("price", entry_price)
 
             # Calculate P&L
-            quantity = position["quantity"]
             if direction == "long":
-                pnl = (exit_price - entry_price) * quantity
+                pnl = (exit_price - entry_price) * abs(quantity)
                 pnl_pct = ((exit_price / entry_price) - 1) * 100
             else:
-                pnl = (entry_price - exit_price) * quantity
+                pnl = (entry_price - exit_price) * abs(quantity)
                 pnl_pct = ((entry_price / exit_price) - 1) * 100
-
-            # Cancel any pending orders for this symbol
-            self._cancel_orders_for_symbol(alpaca_symbol)
 
             logger.info(
                 f"Closed {direction.upper()} position: {symbol} @ ${exit_price:.2f} "
