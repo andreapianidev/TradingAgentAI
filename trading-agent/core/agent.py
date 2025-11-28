@@ -611,6 +611,25 @@ class TradingAgent:
                 logger.debug(f"Error saving news to database: {e}")
 
             # Step 2: Run advanced analysis (scraping + DeepSeek)
+            # Check if current hour is in scheduled hours
+            from datetime import datetime
+            current_hour = datetime.utcnow().hour
+            scheduled_hours_setting = db_ops.get_setting("news_analysis_schedule_hours")
+            scheduled_hours = scheduled_hours_setting if scheduled_hours_setting is not None else [6, 12, 18]
+
+            if current_hour not in scheduled_hours:
+                logger.debug(
+                    f"Current hour {current_hour} UTC not in scheduled hours {scheduled_hours} for news analysis. Skipping deep analysis."
+                )
+                # Return basic news without deep analysis
+                return {
+                    "raw_news": raw_news,
+                    "analysis": {"analyzed_articles": [], "aggregated_sentiment": {}, "symbol_sentiments": {}, "high_impact_news": []},
+                    "aggregated_sentiment": {},
+                    "symbol_sentiments": {},
+                    "high_impact_news": [],
+                }
+
             analysis = analyze_news(raw_news)
 
             # Step 3: Save analyzed news to database

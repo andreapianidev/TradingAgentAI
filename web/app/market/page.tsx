@@ -43,6 +43,8 @@ export default function MarketPage() {
   const [selectedSymbol, setSelectedSymbol] = useState('BTC')
   const [loading, setLoading] = useState(true)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
+  const [generatingAnalysis, setGeneratingAnalysis] = useState(false)
+  const [analysisSuccess, setAnalysisSuccess] = useState(false)
 
   const fetchMarketData = useCallback(async () => {
     setLoading(true)
@@ -82,6 +84,38 @@ export default function MarketPage() {
       setLoading(false)
     }
   }, [])
+
+  const generateAnalysis = async () => {
+    setGeneratingAnalysis(true)
+    setAnalysisSuccess(false)
+    try {
+      const response = await fetch('/api/market/generate-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: selectedSymbol })
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to generate analysis')
+      }
+
+      const result = await response.json()
+      console.log('Analysis generated:', result)
+
+      // Show success message
+      setAnalysisSuccess(true)
+      setTimeout(() => setAnalysisSuccess(false), 3000)
+
+      // Refresh data to show new analysis
+      await fetchMarketData()
+    } catch (error) {
+      console.error('Error generating analysis:', error)
+      alert('Errore nella generazione dell\'analisi. Controlla la console per dettagli.')
+    } finally {
+      setGeneratingAnalysis(false)
+    }
+  }
 
   useEffect(() => {
     fetchMarketData()
@@ -180,11 +214,37 @@ export default function MarketPage() {
               <span>Updated {formatTimeAgo(lastUpdate.toISOString())}</span>
             </div>
           )}
+          {analysisSuccess && (
+            <div className="flex items-center gap-2 text-sm text-green-400 animate-fade-in">
+              <Sparkles className="w-4 h-4 animate-pulse" />
+              <span>Analisi generata con successo!</span>
+            </div>
+          )}
+          <button
+            onClick={generateAnalysis}
+            disabled={generatingAnalysis || loading}
+            className="btn btn-primary flex items-center gap-2 group
+                       hover:scale-105 hover:shadow-lg hover:shadow-purple-500/20
+                       active:scale-95 transition-all duration-200
+                       disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100
+                       ripple-container"
+          >
+            <Brain className={cn(
+              "w-4 h-4 transition-transform duration-500",
+              generatingAnalysis && "animate-pulse",
+              "group-hover:scale-110"
+            )} />
+            <span className="group-hover:tracking-wide transition-all duration-200">
+              {generatingAnalysis ? 'Generazione...' : 'Genera Analisi'}
+            </span>
+          </button>
           <button
             onClick={fetchMarketData}
+            disabled={loading || generatingAnalysis}
             className="btn btn-secondary flex items-center gap-2 group
                        hover:scale-105 hover:shadow-lg hover:shadow-green-500/10
                        active:scale-95 transition-all duration-200
+                       disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100
                        ripple-container"
           >
             <RefreshCw className={cn(

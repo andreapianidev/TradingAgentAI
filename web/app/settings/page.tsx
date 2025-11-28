@@ -640,6 +640,93 @@ export default function SettingsPage() {
         </div>
       )}
 
+      {/* Schedule Settings */}
+      <div className={cn(
+        "card settings-card",
+        mounted && "animate-fade-in-up"
+      )} style={{ animationDelay: '0.55s' }}>
+        <div className="card-header">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-purple-500/10">
+              <Clock className="w-5 h-5 text-purple-500 category-icon" />
+            </div>
+            <div>
+              <h2 className="card-title">Schedule Settings</h2>
+              <p className="text-sm text-gray-500 font-normal">Configure when daily updates should run (UTC timezone)</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 space-y-4">
+          {/* AI Market Analysis Schedule */}
+          <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <div className="font-medium text-gray-900 dark:text-white mb-1">
+                  AI Market Analysis
+                </div>
+                <div className="text-sm text-gray-500">
+                  Daily comprehensive market analysis update time
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  max="23"
+                  value={changes.ai_analysis_schedule_hour ?? settings.find(s => s.setting_key === 'ai_analysis_schedule_hour')?.setting_value ?? 9}
+                  onChange={(e) => handleChange('ai_analysis_schedule_hour', parseInt(e.target.value))}
+                  className="w-20 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                />
+                <span className="text-sm text-gray-500">:00 UTC</span>
+              </div>
+            </div>
+          </div>
+
+          {/* News Analysis Schedule */}
+          <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <div className="font-medium text-gray-900 dark:text-white mb-1">
+                  News Analysis
+                </div>
+                <div className="text-sm text-gray-500">
+                  Hours when news analysis should run (comma-separated)
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="6,12,18"
+                  value={
+                    changes.news_analysis_schedule_hours
+                      ? Array.isArray(changes.news_analysis_schedule_hours)
+                        ? changes.news_analysis_schedule_hours.join(',')
+                        : String(changes.news_analysis_schedule_hours)
+                      : (settings.find(s => s.setting_key === 'news_analysis_schedule_hours')?.setting_value as number[] || [6, 12, 18]).join(',')
+                  }
+                  onChange={(e) => {
+                    const hours = e.target.value.split(',').map(h => parseInt(h.trim())).filter(h => !isNaN(h) && h >= 0 && h <= 23)
+                    handleChange('news_analysis_schedule_hours', hours)
+                  }}
+                  className="w-32 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                />
+                <span className="text-sm text-gray-500">UTC</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-blue-50 dark:bg-blue-500/5 border border-blue-200 dark:border-blue-500/20 rounded-lg p-3">
+            <div className="text-sm text-blue-600 dark:text-blue-300 flex items-start gap-2">
+              <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <div>
+                The bot runs every 15 minutes. These settings determine during which hour the daily/periodic tasks should execute. All times are in UTC timezone.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Database Cleanup */}
       <div className={cn(
         "card settings-card",
@@ -775,7 +862,7 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mt-4">
           <div className="db-info-item">
             <div className="text-sm text-gray-500 mb-1">Provider</div>
             <div className="text-gray-900 dark:text-white font-medium flex items-center gap-2">
@@ -796,6 +883,18 @@ export default function SettingsPage() {
             <div className="text-green-500 font-medium flex items-center gap-1">
               <CheckCircle className="w-4 h-4" />
               Yes
+            </div>
+          </div>
+          <div className="db-info-item">
+            <div className="text-sm text-gray-500 mb-1">Trading Tables Size</div>
+            <div className="text-gray-900 dark:text-white font-medium">
+              {dbStats?.tradingTablesSizeMB ? `${dbStats.tradingTablesSizeMB} MB` : '—'}
+            </div>
+          </div>
+          <div className="db-info-item">
+            <div className="text-sm text-gray-500 mb-1">Total DB Size</div>
+            <div className="text-gray-900 dark:text-white font-medium">
+              {dbStats?.totalDatabaseSizeMB ? `${dbStats.totalDatabaseSizeMB} MB` : '—'}
             </div>
           </div>
         </div>
