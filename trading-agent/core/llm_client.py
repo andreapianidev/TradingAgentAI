@@ -265,6 +265,132 @@ class DeepSeekClient:
             "reasoning": "Default hold due to API error or invalid response"
         }
 
+    def get_trading_decision_with_prompts(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        symbol: str
+    ) -> Dict[str, Any]:
+        """
+        Get trading decision usando prompts custom (specializzati).
+
+        Questo metodo permette di usare prompt diversi dal default,
+        ad esempio prompt specializzati per alta volatilità, trending, ecc.
+
+        Args:
+            system_prompt: Custom system prompt
+            user_prompt: Custom user prompt
+            symbol: Trading symbol (per logging)
+
+        Returns:
+            Decision dictionary
+        """
+        try:
+            # Log prompts
+            log_llm_request(symbol, system_prompt, user_prompt)
+
+            # Make API call
+            response = self._call_api(system_prompt, user_prompt)
+
+            if response is None:
+                logger.error("No response from DeepSeek API")
+                log_llm_response(symbol, None, None)
+                return self._default_hold_decision(symbol)
+
+            # Parse response
+            decision = self._parse_response(response)
+
+            # Log response
+            log_llm_response(symbol, response, decision)
+
+            if decision is None:
+                # Retry with correction
+                decision = self._retry_with_correction(
+                    system_prompt, user_prompt, response
+                )
+
+            if decision is None:
+                logger.warning("Failed to parse LLM response, defaulting to HOLD")
+                return self._default_hold_decision(symbol)
+
+            # Log decision
+            log_trade_decision(
+                symbol=decision.get("symbol", symbol),
+                action=decision.get("action", "hold"),
+                direction=decision.get("direction"),
+                confidence=decision.get("confidence", 0),
+                reasoning=decision.get("reasoning", "No reasoning provided")
+            )
+
+            return decision
+
+        except Exception as e:
+            logger.error(f"Error getting trading decision: {e}")
+            return self._default_hold_decision(symbol)
+
+    def get_trading_decision_with_prompts(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        symbol: str
+    ) -> Dict[str, Any]:
+        """
+        Get trading decision usando prompts custom (specializzati).
+
+        Questo metodo permette di usare prompt diversi dal default,
+        ad esempio prompt specializzati per alta volatilità, trending, ecc.
+
+        Args:
+            system_prompt: Custom system prompt
+            user_prompt: Custom user prompt
+            symbol: Trading symbol (per logging)
+
+        Returns:
+            Decision dictionary
+        """
+        try:
+            # Log prompts
+            log_llm_request(symbol, system_prompt, user_prompt)
+
+            # Make API call
+            response = self._call_api(system_prompt, user_prompt)
+
+            if response is None:
+                logger.error("No response from DeepSeek API")
+                log_llm_response(symbol, None, None)
+                return self._default_hold_decision(symbol)
+
+            # Parse response
+            decision = self._parse_response(response)
+
+            # Log response
+            log_llm_response(symbol, response, decision)
+
+            if decision is None:
+                # Retry with correction
+                decision = self._retry_with_correction(
+                    system_prompt, user_prompt, response
+                )
+
+            if decision is None:
+                logger.warning("Failed to parse LLM response, defaulting to HOLD")
+                return self._default_hold_decision(symbol)
+
+            # Log decision
+            log_trade_decision(
+                symbol=decision.get("symbol", symbol),
+                action=decision.get("action", "hold"),
+                direction=decision.get("direction"),
+                confidence=decision.get("confidence", 0),
+                reasoning=decision.get("reasoning", "No reasoning provided")
+            )
+
+            return decision
+
+        except Exception as e:
+            logger.error(f"Error getting trading decision: {e}")
+            return self._default_hold_decision(symbol)
+
     def test_connection(self) -> bool:
         """Test API connection."""
         try:

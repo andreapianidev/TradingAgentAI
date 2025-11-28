@@ -463,11 +463,87 @@ class TradingAgent:
             }
         )
 
-        # 7. Check if we have an existing position
+        # 7. NUOVO: Advanced news analysis
+        from data.news_analyzer import news_analyzer
+        logger.info("Analyzing news with advanced sentiment and relevance scoring...")
+        news_analysis = news_analyzer.analyze_news_for_symbol(symbol, news)
+
+        logger.info(f"News Analysis: {news_analysis.get('aggregate_sentiment')} "
+                   f"(score: {news_analysis.get('overall_score'):.2f}, "
+                   f"relevance: {news_analysis.get('relevance_score'):.2f}, "
+                   f"confidence: {news_analysis.get('confidence'):.2%})")
+
+        # 8. NUOVO: Data quality validation
+        from core.data_validator import data_validator
+        logger.info("Validating data quality...")
+        data_quality = data_validator.validate_all_data(
+            market_data=market_data,
+            indicators=indicators,
+            pivot_points=pivot_points,
+            forecast=forecast,
+            orderbook=orderbook,
+            sentiment=sentiment,
+            news=news,
+            whale_flow=whale_flow,
+            coingecko=coingecko
+        )
+
+        quality = data_quality.get('overall_quality', 0)
+        recommendation = data_quality.get('recommendation', 'UNKNOWN')
+        logger.info(f"Data Quality: {quality:.1%} ({recommendation})")
+
+        # Log warnings se presenti
+        if data_quality.get('warnings'):
+            for warning in data_quality['warnings']:
+                logger.warning(f"  ⚠️  {warning}")
+
+        # 9. NUOVO: Calculate weighted scores
+        from core.data_weighting import weighting_engine
+
+        # Determine market regime
+        logger.info("Determining market regime...")
+        market_regime = weighting_engine.determine_market_regime(
+            indicators, coingecko, whale_flow
+        )
+        logger.info(f"Market Regime: {market_regime.upper()}")
+
+        # Calculate composite score
+        logger.info("Calculating weighted decision scores...")
+        weighted_scores = weighting_engine.calculate_composite_score(
+            symbol=symbol,
+            indicators=indicators,
+            pivot_points=pivot_points,
+            forecast=forecast,
+            whale_flow=whale_flow,
+            sentiment=sentiment,
+            news_analysis=news_analysis,
+            coingecko=coingecko,
+            market_regime=market_regime
+        )
+
+        composite_score = weighted_scores.get('composite_score', 0)
+        score_confidence = weighted_scores.get('confidence', 0)
+        logger.info(f"Composite Score: {composite_score:.3f} "
+                   f"(confidence: {score_confidence:.2%})")
+
+        # Log top contributing components
+        components = weighted_scores.get('components', {})
+        sorted_components = sorted(
+            components.items(),
+            key=lambda x: x[1].get('contribution', 0),
+            reverse=True
+        )
+        logger.info("Top Contributing Factors:")
+        for comp_name, comp_data in sorted_components[:3]:
+            contribution = comp_data.get('contribution', 0)
+            comp_score = comp_data.get('score', 0)
+            logger.info(f"  • {comp_name}: score={comp_score:.3f}, contribution={contribution:.3f}")
+
+        # 10. Check if we have an existing position
         has_position = portfolio_manager.client.has_open_position(symbol)
 
-        # 8. Get LLM decision
-        logger.info("Requesting LLM decision...")
+        # 11. Get LLM decision with enhanced prompts
+        logger.info("Requesting LLM decision with specialized prompts...")
 
         # Add is_paper flag to portfolio dict for AI to know trading mode
         portfolio_with_mode = {
@@ -475,7 +551,14 @@ class TradingAgent:
             'is_paper': portfolio_manager.is_paper_trading
         }
 
-        decision = llm_client.get_trading_decision(
+        # Determine action context
+        action_context = "close_position" if has_position else "market_analysis"
+
+        # Get specialized prompt
+        from config.prompts import get_system_prompt_for_scenario, build_user_prompt_with_scores
+
+        system_prompt = get_system_prompt_for_scenario(action_context, market_regime)
+        user_prompt = build_user_prompt_with_scores(
             symbol=symbol,
             portfolio=portfolio_with_mode,
             market_data=market_data,
@@ -487,7 +570,17 @@ class TradingAgent:
             news=news,
             open_positions=open_positions,
             whale_flow=whale_flow,
-            coingecko=coingecko
+            coingecko=coingecko,
+            weighted_scores=weighted_scores,      # NUOVO
+            news_analysis=news_analysis,          # NUOVO
+            data_quality=data_quality             # NUOVO
+        )
+
+        # Call LLM with specialized prompts
+        decision = llm_client.get_trading_decision_with_prompts(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            symbol=symbol
         )
 
         action = decision.get("action", ACTION_HOLD)
