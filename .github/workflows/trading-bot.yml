@@ -4,6 +4,11 @@ on:
   # Run every 15 minutes
   schedule:
     - cron: '*/15 * * * *'
+    # Priority runs for scheduled analysis (to ensure execution even with GitHub Actions delays)
+    - cron: '0 9 * * *'   # 9:00 UTC - AI Market Analysis
+    - cron: '0 6 * * *'   # 6:00 UTC - News Analysis
+    - cron: '0 12 * * *'  # 12:00 UTC - News Analysis
+    - cron: '0 18 * * *'  # 18:00 UTC - News Analysis
 
   # Allow manual trigger from GitHub UI
   workflow_dispatch:
