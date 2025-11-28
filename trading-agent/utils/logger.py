@@ -220,12 +220,22 @@ def log_trade_decision(
     """Log a trading decision in a formatted way."""
     logger = get_logger("decisions")
     direction_str = direction.upper() if direction else "N/A"
+
+    # Convert reasoning to string if it's not already (handles dict, list, etc.)
+    if not isinstance(reasoning, str):
+        reasoning_str = str(reasoning)
+    else:
+        reasoning_str = reasoning
+
+    # Truncate reasoning to 200 characters
+    reasoning_preview = reasoning_str[:200] + "..." if len(reasoning_str) > 200 else reasoning_str
+
     logger.info(
         f"\n{'='*50}\n"
         f"TRADE DECISION: {symbol}\n"
         f"Action: {action.upper()} | Direction: {direction_str}\n"
         f"Confidence: {confidence:.2%}\n"
-        f"Reasoning: {reasoning[:200]}...\n"
+        f"Reasoning: {reasoning_preview}\n"
         f"{'='*50}"
     )
 
