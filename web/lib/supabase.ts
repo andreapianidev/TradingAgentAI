@@ -406,3 +406,37 @@ export interface TradingWatchlist {
   created_at: string
   updated_at: string
 }
+
+export interface TradingExchangeTransition {
+  id: string
+  created_at: string
+  updated_at: string
+  transition_strategy: 'IMMEDIATE' | 'PROFITABLE' | 'WAIT_PROFIT' | 'MANUAL'
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled'
+  from_exchange: string
+  to_exchange: string
+  total_positions: number
+  positions_closed: number
+  positions_remaining: number
+  positions_in_profit: number
+  positions_in_loss: number
+  total_pnl?: number
+  total_pnl_pct?: number
+  started_at?: string
+  completed_at?: string
+  last_check_at?: string
+  manual_override_required: boolean
+  manual_override_approved: boolean
+  manual_override_by?: string
+  manual_override_at?: string
+  error_count: number
+  last_error?: string
+  retry_after?: string
+  position_ids: string[]
+  transition_log: Array<{
+    timestamp: string
+    level: 'INFO' | 'WARNING' | 'ERROR'
+    message: string
+  }>
+  trading_mode: 'paper' | 'live'
+}

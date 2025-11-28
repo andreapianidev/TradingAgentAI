@@ -1023,3 +1023,13 @@ class SupabaseOperations:
 
 # Global operations instance
 db_ops = SupabaseOperations()
+
+
+def get_supabase_client() -> Client:
+    """
+    Get the Supabase client instance.
+
+    Returns:
+        Client: Supabase client
+    """
+    return db_ops.client

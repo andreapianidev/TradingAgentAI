@@ -129,6 +129,117 @@ class TradingAgent:
         logger.info(f"Starting Trading Cycle at {cycle_start.isoformat()}")
         logger.info("=" * 50)
 
+        # ============ EXCHANGE TRANSITION CHECK ============
+        from core.exchange_transition_manager import transition_manager, TransitionStrategy
+        from exchange.exchange_factory import create_exchange_client
+        from database.operations import db_ops
+
+        current_exchange = settings.EXCHANGE
+        previous_exchange = transition_manager.detect_exchange_change(current_exchange)
+
+        # Detect exchange change and start transition
+        if previous_exchange and previous_exchange != current_exchange:
+            logger.warning("=" * 60)
+            logger.warning("EXCHANGE CHANGE DETECTED!")
+            logger.warning(f"  From: {previous_exchange.upper()}")
+            logger.warning(f"  To: {current_exchange.upper()}")
+            logger.warning("=" * 60)
+
+            # Connect to OLD exchange to get open positions
+            old_client = create_exchange_client(previous_exchange)
+            if old_client.connect():
+                old_portfolio = old_client.fetch_portfolio()
+                old_positions = old_portfolio.get('positions', [])
+                position_symbols = [p.get('symbol') for p in old_positions]
+
+                logger.info(f"Found {len(old_positions)} open positions on {previous_exchange}")
+
+                # Get transition strategy from settings
+                strategy_name = settings.TRANSITION_STRATEGY
+                try:
+                    strategy = TransitionStrategy[strategy_name]
+                except KeyError:
+                    logger.error(f"Invalid transition strategy: {strategy_name}, using WAIT_PROFIT")
+                    strategy = TransitionStrategy.WAIT_PROFIT
+
+                logger.info(f"Transition strategy: {strategy.value}")
+
+                # Start transition
+                transition_id = transition_manager.start_transition(
+                    from_exchange=previous_exchange,
+                    to_exchange=current_exchange,
+                    strategy=strategy,
+                    position_ids=position_symbols
+                )
+
+                if transition_id:
+                    logger.info(f"Transition started: {transition_id}")
+
+                    # Save alert to database
+                    db_ops.save_alert(
+                        alert_type="exchange_transition",
+                        title=f"Exchange Transition Started: {previous_exchange} → {current_exchange}",
+                        message=f"Strategy: {strategy.value}. {len(old_positions)} positions to close.",
+                        severity="warning",
+                        details={
+                            "transition_id": transition_id,
+                            "from_exchange": previous_exchange,
+                            "to_exchange": current_exchange,
+                            "strategy": strategy.value,
+                            "position_count": len(old_positions)
+                        }
+                    )
+
+                old_client.disconnect()
+
+        # ============ ACTIVE TRANSITION EXECUTION ============
+        if transition_manager.should_execute_transition_cycle():
+            logger.info("=" * 60)
+            logger.info("ACTIVE TRANSITION - Running Transition Cycle")
+            logger.info("=" * 60)
+
+            # Get transition details
+            transition = transition_manager.get_transition_status()
+            if transition:
+                logger.info(f"Transition ID: {transition['id']}")
+                logger.info(f"Strategy: {transition['transition_strategy']}")
+                logger.info(f"Progress: {transition['positions_closed']}/{transition['total_positions']} closed")
+
+                # Connect to OLD exchange
+                old_exchange_client = create_exchange_client(transition['from_exchange'])
+                if not old_exchange_client.connect():
+                    logger.error("Failed to connect to old exchange for transition")
+                    return {"success": False, "error": "Exchange connection failed"}
+
+                # Execute transition cycle
+                result = transition_manager.execute_transition_cycle(old_exchange_client)
+
+                # Log results
+                logger.info("-" * 60)
+                logger.info("TRANSITION CYCLE RESULTS:")
+                logger.info(f"  Status: {result.get('status', 'unknown')}")
+                logger.info(f"  Closed: {result.get('positions_closed', 0)}/{result.get('total_positions', 0)}")
+                logger.info(f"  Remaining: {result.get('positions_remaining', 0)}")
+                logger.info(f"  In Profit: {result.get('positions_in_profit', 0)}")
+                logger.info(f"  In Loss: {result.get('positions_in_loss', 0)}")
+                if 'total_pnl' in result:
+                    logger.info(f"  Total P&L: ${result.get('total_pnl', 0):.2f}")
+                logger.info("-" * 60)
+
+                # Disconnect old exchange
+                old_exchange_client.disconnect()
+
+                # Return transition results (skip normal trading)
+                return {
+                    "success": True,
+                    "mode": "transition",
+                    "transition_status": result,
+                    "duration_seconds": (datetime.utcnow() - cycle_start).total_seconds()
+                }
+
+        # ============ NORMAL TRADING CYCLE ============
+        # Only executes if NO active transition
+
         results = {
             "success": True,
             "timestamp": cycle_start.isoformat(),
