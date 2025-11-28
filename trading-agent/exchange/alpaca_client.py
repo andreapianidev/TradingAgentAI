@@ -378,9 +378,9 @@ class AlpacaClient:
             account = self._retry_request(self.trading_client.get_account)
 
             total_equity = float(account.equity)
-            available = float(account.buying_power)
-            # For margin accounts
-            margin_used = total_equity - available if available < total_equity else 0
+            cash = float(account.cash)
+            # Calculate margin used (equity - cash = positions value)
+            margin_used = total_equity - cash if cash < total_equity else 0
 
             # Fetch positions
             positions = self._fetch_positions_internal()
@@ -394,7 +394,7 @@ class AlpacaClient:
 
             return {
                 "total_equity": total_equity,
-                "available_balance": available,
+                "available_balance": cash,
                 "margin_used": margin_used,
                 "exposure_pct": exposure * 100,
                 "positions": positions,
