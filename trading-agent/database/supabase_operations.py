@@ -657,23 +657,8 @@ class SupabaseOperations:
             .eq("analysis_date", date.today().isoformat()) \
             .execute()
 
-        if len(result.data) > 0:
-            # Already generated today
-            return False
-
-        # Check if current hour matches scheduled hour
-        current_hour = datetime.utcnow().hour
-        scheduled_hour_setting = self.get_setting("ai_analysis_schedule_hour")
-        scheduled_hour = scheduled_hour_setting if scheduled_hour_setting is not None else 9
-
-        # Generate only during the scheduled hour
-        if current_hour != scheduled_hour:
-            logger.debug(
-                f"Current hour {current_hour} UTC doesn't match scheduled hour {scheduled_hour} UTC for AI analysis"
-            )
-            return False
-
-        return True
+        # Already generated today - don't generate again
+        return len(result.data) == 0
 
     # ============== News (Batch) ==============
 
