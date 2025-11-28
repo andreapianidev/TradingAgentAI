@@ -792,26 +792,49 @@ class AlpacaClient:
                 total_qty = abs(float(alpaca_position.qty))
                 logger.warning(
                     f"Position {symbol} has qty_available=0 but total qty={total_qty:.8f}. "
-                    f"Position may still be locked. Waiting additional 5s and retrying..."
+                    f"Balance is locked - using Alpaca's native close position API instead."
                 )
-                time.sleep(5)
 
-                # Re-check quantity after additional wait
-                actual_qty, qty_warning = self._get_actual_position_quantity(symbol, alpaca_symbol)
+                # Use Alpaca's native position close endpoint which handles locked balances
+                try:
+                    logger.info(f"Attempting native position close for {alpaca_symbol}")
+                    close_response = self.trading_client.close_position(alpaca_symbol)
 
-                if actual_qty == 0:
-                    # Still locked - use total quantity as last resort
-                    logger.error(
-                        f"Position {symbol} still showing qty_available=0 after extended wait. "
-                        f"Attempting to close using total quantity {total_qty:.8f}"
-                    )
-                    actual_qty = total_qty
+                    logger.info(f"✓ Native close successful for {symbol}")
 
-                    if actual_qty == 0:
+                    # Wait for the close to process
+                    time.sleep(2)
+
+                    # Get the order details
+                    if hasattr(close_response, 'id'):
+                        filled_order = self.trading_client.get_order_by_id(close_response.id)
+
                         return {
-                            "success": False,
-                            "error": f"Position {symbol} has zero quantity on exchange"
+                            "success": True,
+                            "symbol": symbol,
+                            "side": "sell" if direction == "long" else "buy",
+                            "quantity": float(filled_order.filled_qty) if filled_order.filled_qty else total_qty,
+                            "fill_price": float(filled_order.filled_avg_price) if filled_order.filled_avg_price else entry_price,
+                            "order_id": close_response.id,
+                            "method": "native_close"
                         }
+                    else:
+                        # Close response doesn't have order ID - return success with estimated values
+                        return {
+                            "success": True,
+                            "symbol": symbol,
+                            "side": "sell" if direction == "long" else "buy",
+                            "quantity": total_qty,
+                            "fill_price": entry_price,  # Estimate
+                            "order_id": "native_close",
+                            "method": "native_close"
+                        }
+
+                except Exception as close_error:
+                    logger.error(f"Native position close failed: {close_error}")
+                    # Fall through to manual close attempt below
+                    logger.warning("Falling back to manual close order...")
+                    actual_qty = total_qty
 
             # STEP 4: Prepare market order to close
             from alpaca.trading.requests import MarketOrderRequest
@@ -910,13 +933,38 @@ class AlpacaClient:
                             break
                         except Exception as fallback_error:
                             logger.error(f"Partial close also failed: {fallback_error}")
-                            raise e  # Raise original error
+
+                            # Last resort: try Alpaca's native close position API
+                            logger.warning("All manual close attempts failed. Trying native position close API as final fallback...")
+                            try:
+                                close_response = self.trading_client.close_position(alpaca_symbol)
+                                logger.info(f"✓ Final fallback: native close successful for {symbol}")
+
+                                # Wait and get order details
+                                time.sleep(2)
+                                if hasattr(close_response, 'id'):
+                                    order = self.trading_client.get_order_by_id(close_response.id)
+                                    if order:
+                                        logger.info(f"Retrieved order details from native close")
+                                        break
+                            except Exception as native_error:
+                                logger.error(f"Native close also failed: {native_error}")
+                                # Return graceful error instead of crashing
+                                return {
+                                    "success": False,
+                                    "error": f"All close attempts failed. Position may still be locked on exchange. Original error: {str(e)}"
+                                }
                     else:
                         # Not a balance error or other issue - raise immediately
                         raise
 
             if not order:
-                raise Exception("Failed to close position after max retries and fallback")
+                # All attempts failed - return graceful error instead of raising
+                logger.error(f"Failed to close position {symbol} after all retries and fallbacks")
+                return {
+                    "success": False,
+                    "error": "Failed to close position after max retries. Position may still be locked."
+                }
 
             # STEP 6: Wait for fill and get execution details
             time.sleep(2)
