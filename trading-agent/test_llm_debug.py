@@ -93,7 +93,12 @@ def test_simple_call():
         print(f"Action: {decision.get('action')}")
         print(f"Direction: {decision.get('direction')}")
         print(f"Confidence: {decision.get('confidence')}")
-        print(f"Reasoning: {decision.get('reasoning', '')[:200]}...")
+
+        # Safe handling of reasoning (could be str, dict, or list)
+        reasoning = decision.get('reasoning', '')
+        reasoning_str = str(reasoning) if not isinstance(reasoning, str) else reasoning
+        reasoning_preview = reasoning_str[:200] + "..." if len(reasoning_str) > 200 else reasoning_str
+        print(f"Reasoning: {reasoning_preview}")
         print("=" * 60)
 
         if decision.get('action') == 'hold' and 'Default hold due to' in decision.get('reasoning', ''):
