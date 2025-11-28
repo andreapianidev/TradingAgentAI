@@ -229,8 +229,31 @@ class TradingAgent:
 
         logger.info("-" * 50)
 
+        # ============ DYNAMIC PORTFOLIO MANAGEMENT ============
+        # Evaluate trending coins and update watchlist
+        dynamic_symbols = []
+        if settings.ENABLE_DYNAMIC_PORTFOLIO:
+            logger.info("=" * 60)
+            logger.info("DYNAMIC PORTFOLIO MANAGEMENT")
+            logger.info("=" * 60)
+
+            dynamic_symbols = self._update_dynamic_watchlist(
+                portfolio=portfolio,
+                sentiment=sentiment,
+                news=news,
+                coingecko=coingecko
+            )
+
+            logger.info(f"Active watchlist: {len(dynamic_symbols)} coins")
+            logger.info(f"Symbols to process: {', '.join(dynamic_symbols)}")
+            logger.info("=" * 60)
+        else:
+            # Use static symbols from settings
+            dynamic_symbols = self.symbols
+            logger.info(f"Dynamic portfolio DISABLED - using static symbols: {', '.join(dynamic_symbols)}")
+
         # Process each symbol
-        for symbol in self.symbols:
+        for symbol in dynamic_symbols:
             try:
                 result = self._process_symbol(
                     symbol=symbol,
@@ -878,6 +901,218 @@ class TradingAgent:
 
             except Exception as e:
                 logger.warning(f"Failed to generate AI analysis for {symbol}: {e}")
+
+    def _update_dynamic_watchlist(
+        self,
+        portfolio: Dict[str, Any],
+        sentiment: Dict[str, Any],
+        news: List[Dict[str, Any]],
+        coingecko: Dict[str, Any]
+    ) -> List[str]:
+        """
+        Update dynamic watchlist with trending cryptocurrencies.
+
+        This method:
+        1. Fetches trending coins from CMC
+        2. Evaluates each coin using CryptoEvaluator
+        3. Updates trading_watchlist table in Supabase
+        4. Returns list of symbols to process
+
+        Args:
+            portfolio: Current portfolio state
+            sentiment: Market sentiment data
+            news: Recent news articles
+            coingecko: CoinGecko market data
+
+        Returns:
+            List of symbols to process (core + opportunistic)
+        """
+        from data.cmc_trending import get_trending_coins
+        from core.crypto_evaluator import evaluate_crypto_opportunity
+        from core.portfolio_allocator import calculate_portfolio_allocation
+        from database.watchlist_ops import save_to_watchlist, get_active_watchlist, remove_from_watchlist
+        from config.supabase_settings import supabase_settings
+
+        try:
+            # Load active strategy for allocation config
+            active_strategy = supabase_settings.load_active_strategy()
+
+            # Step 1: Get trending coins from CMC
+            logger.info("Fetching trending coins from CoinMarketCap...")
+            trending_data = get_trending_coins(
+                limit=settings.TRENDING_FETCH_LIMIT,
+                analyze_top=settings.TRENDING_ANALYZE_TOP
+            )
+
+            trending_coins = trending_data.get("trending_coins", [])
+            logger.info(f"Found {len(trending_coins)} Alpaca-supported coins in top {settings.TRENDING_ANALYZE_TOP} trending")
+
+            # Step 2: Evaluate all coins (core + trending)
+            # Core symbols are ALWAYS in the watchlist
+            core_symbols = ["BTC", "ETH", "SOL"]
+            all_evaluations = {}
+
+            # Evaluate core symbols first
+            logger.info("Evaluating core portfolio symbols...")
+            for symbol in core_symbols:
+                try:
+                    # Get basic technical data for evaluation
+                    market_data = market_data_collector.get_complete_market_data(symbol)
+                    ohlcv = market_data.get("ohlcv", [])
+
+                    if not ohlcv:
+                        logger.warning(f"No data for {symbol}, skipping evaluation")
+                        continue
+
+                    indicators = calculate_indicators(ohlcv)
+
+                    # Find this coin in trending data if present
+                    trending_info = next(
+                        (t for t in trending_coins if t.get("symbol") == symbol),
+                        None
+                    )
+
+                    # Evaluate opportunity
+                    evaluation = evaluate_crypto_opportunity(
+                        symbol=symbol,
+                        technical_data=indicators,
+                        sentiment_data=sentiment,
+                        trending_data=trending_info,
+                        news_analysis=None,  # Will be done per-symbol in _process_symbol
+                        coingecko_data=coingecko
+                    )
+
+                    all_evaluations[symbol] = evaluation
+                    logger.info(f"  {symbol}: score {evaluation.get('overall_score'):.1f} ({evaluation.get('opportunity_level')})")
+
+                except Exception as e:
+                    logger.error(f"Error evaluating {symbol}: {e}")
+
+            # Evaluate opportunistic symbols (trending, non-core)
+            logger.info("Evaluating opportunistic trending coins...")
+            opportunistic_evaluations = {}
+
+            for trending_coin in trending_coins:
+                symbol = trending_coin.get("symbol")
+
+                # Skip core symbols (already evaluated)
+                if symbol in core_symbols:
+                    continue
+
+                try:
+                    # Get technical data
+                    market_data = market_data_collector.get_complete_market_data(symbol)
+                    ohlcv = market_data.get("ohlcv", [])
+
+                    if not ohlcv:
+                        logger.debug(f"No OHLCV data for {symbol}, skipping")
+                        continue
+
+                    indicators = calculate_indicators(ohlcv)
+
+                    # Evaluate opportunity
+                    evaluation = evaluate_crypto_opportunity(
+                        symbol=symbol,
+                        technical_data=indicators,
+                        sentiment_data=sentiment,
+                        trending_data=trending_coin,
+                        news_analysis=None,
+                        coingecko_data=coingecko
+                    )
+
+                    opportunistic_evaluations[symbol] = evaluation
+                    logger.info(f"  {symbol}: score {evaluation.get('overall_score'):.1f} ({evaluation.get('opportunity_level')})")
+
+                except Exception as e:
+                    logger.warning(f"Error evaluating {symbol}: {e}")
+
+            # Combine all evaluations
+            all_evaluations.update(opportunistic_evaluations)
+
+            # Step 3: Calculate optimal portfolio allocation
+            logger.info("Calculating portfolio allocation...")
+            allocation_plan = calculate_portfolio_allocation(
+                portfolio=portfolio,
+                opportunity_scores=all_evaluations,
+                active_strategy=active_strategy
+            )
+
+            allocations = allocation_plan.get("allocations", {})
+
+            # Step 4: Update watchlist in Supabase
+            logger.info("Updating watchlist in database...")
+
+            # Save/update core positions
+            for symbol in core_symbols:
+                if symbol in all_evaluations:
+                    evaluation = all_evaluations[symbol]
+                    allocation = allocations.get(symbol)
+
+                    save_to_watchlist(
+                        symbol=symbol,
+                        tier="CORE",
+                        evaluation=evaluation,
+                        allocation=allocation
+                    )
+
+            # Save/update opportunistic positions (top N by score)
+            sorted_opportunistic = sorted(
+                opportunistic_evaluations.items(),
+                key=lambda x: x[1].get("overall_score", 0),
+                reverse=True
+            )
+
+            max_opportunistic = settings.MAX_OPPORTUNISTIC_COINS
+            selected_opportunistic = []
+
+            for symbol, evaluation in sorted_opportunistic[:max_opportunistic]:
+                # Only add if meets minimum score and criteria
+                if (
+                    evaluation.get("overall_score", 0) >= settings.MIN_OPPORTUNITY_SCORE and
+                    evaluation.get("criteria_met", {}).get("overall_quality", False)
+                ):
+                    allocation = allocations.get(symbol)
+
+                    save_to_watchlist(
+                        symbol=symbol,
+                        tier="OPPORTUNISTIC",
+                        evaluation=evaluation,
+                        allocation=allocation
+                    )
+
+                    selected_opportunistic.append(symbol)
+                    logger.info(f"Added {symbol} to opportunistic watchlist")
+
+            # Remove opportunistic coins that are no longer qualifying
+            current_watchlist = get_active_watchlist(tier="OPPORTUNISTIC")
+            current_opportunistic_symbols = [entry["symbol"] for entry in current_watchlist]
+
+            for symbol in current_opportunistic_symbols:
+                if symbol not in selected_opportunistic:
+                    evaluation = opportunistic_evaluations.get(symbol, {})
+                    score = evaluation.get("overall_score", 0)
+                    reason = f"Score dropped to {score:.1f} or failed criteria"
+
+                    remove_from_watchlist(symbol, reason)
+                    logger.info(f"Removed {symbol} from watchlist: {reason}")
+
+            # Step 5: Return final symbol list to process
+            symbols_to_process = core_symbols + selected_opportunistic
+
+            logger.info(f"Final watchlist: {len(symbols_to_process)} symbols")
+            logger.info(f"  Core: {', '.join(core_symbols)}")
+            if selected_opportunistic:
+                logger.info(f"  Opportunistic: {', '.join(selected_opportunistic)}")
+
+            return symbols_to_process
+
+        except Exception as e:
+            logger.error(f"Error updating dynamic watchlist: {e}")
+            log_error_with_context(e, "update_dynamic_watchlist")
+
+            # Fallback to static symbols
+            logger.warning("Falling back to static symbols due to error")
+            return self.symbols
 
     def shutdown(self) -> None:
         """Clean shutdown of all components."""

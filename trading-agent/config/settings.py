@@ -76,6 +76,18 @@ class Settings(BaseSettings):
     MAX_POSITION_SIZE_PCT: float = Field(default=5.0)
     MAX_TOTAL_EXPOSURE_PCT: float = Field(default=30.0)
 
+    # ============ DYNAMIC PORTFOLIO MANAGEMENT ============
+    # Parameters for multi-asset dynamic allocation
+    # Can be overridden from Supabase or trading strategy config
+    MAX_OPPORTUNISTIC_COINS: int = Field(default=3)  # Max number of opportunistic coins (beyond BTC/ETH/SOL)
+    MAX_ALT_COIN_PCT: float = Field(default=10.0)  # Max 10% of equity per alt coin
+    CORE_ALLOCATION_PCT: float = Field(default=65.0)  # 65% allocated to core (BTC/ETH/SOL)
+    OPPORTUNISTIC_ALLOCATION_PCT: float = Field(default=25.0)  # 25% allocated to opportunistic coins
+    MIN_OPPORTUNITY_SCORE: float = Field(default=60.0)  # Minimum score to consider opportunistic coin
+    TRENDING_ANALYZE_TOP: int = Field(default=10)  # Analyze top N trending coins from CMC
+    TRENDING_FETCH_LIMIT: int = Field(default=50)  # Fetch top N trending coins from CMC API
+    ENABLE_DYNAMIC_PORTFOLIO: bool = Field(default=True)  # Enable/disable dynamic portfolio management
+
     # ============ LLM - DEEPSEEK ============
     # These are ALWAYS loaded from environment variables (secrets)
     DEEPSEEK_API_KEY: str = Field(default="")

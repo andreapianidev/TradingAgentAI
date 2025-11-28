@@ -376,3 +376,33 @@ export interface TradingBotLog {
   error_stack?: string
   trading_mode: 'paper' | 'live'
 }
+
+export interface TradingWatchlist {
+  id: string
+  symbol: string
+  tier: 'CORE' | 'OPPORTUNISTIC' | 'SATELLITE'
+  is_active: boolean
+  opportunity_score?: number
+  opportunity_level?: 'EXCELLENT' | 'GOOD' | 'MODERATE' | 'WEAK' | 'POOR'
+  technical_score?: number
+  sentiment_score?: number
+  trending_score?: number
+  liquidity_score?: number
+  volatility_score?: number
+  news_score?: number
+  current_price?: number
+  volume_24h?: number
+  market_cap?: number
+  percent_change_24h?: number
+  criteria_met?: any
+  reasoning?: string[]
+  raw_evaluation_data?: any
+  target_allocation_usd?: number
+  current_allocation_usd?: number
+  recommended_action?: string
+  added_at: string
+  last_evaluated_at?: string
+  removed_at?: string
+  created_at: string
+  updated_at: string
+}
