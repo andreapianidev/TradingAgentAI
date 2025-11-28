@@ -20,6 +20,10 @@ import OpenPositions from '@/components/OpenPositions'
 import AlertsPanel from '@/components/AlertsPanel'
 import CostSummaryCard from '@/components/CostSummaryCard'
 import StrategyBadge from '@/components/StrategyBadge'
+import WatchlistWidget from '@/components/WatchlistWidget'
+import PortfolioDistributionChart from '@/components/PortfolioDistributionChart'
+import DecisionTimeline from '@/components/DecisionTimeline'
+import WatchlistAlerts from '@/components/WatchlistAlerts'
 
 const SYNC_INTERVAL = 30000 // 30 seconds
 
@@ -336,6 +340,28 @@ export default function Dashboard() {
 
         {/* Recent Trades */}
         <RecentTrades decisions={recentDecisions} />
+      </div>
+
+      {/* Dynamic Portfolio Management Section */}
+      <div className="space-y-6 mt-6">
+        <div className="flex items-center gap-2 px-4 py-2 bg-blue-900/20 border border-blue-800 rounded-lg">
+          <Target className="w-5 h-5 text-blue-400" />
+          <h2 className="text-lg font-semibold text-blue-400">Dynamic Portfolio Management</h2>
+        </div>
+
+        {/* Top Row: Watchlist + Distribution */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <WatchlistWidget maxItems={8} />
+          <PortfolioDistributionChart />
+        </div>
+
+        {/* Bottom Row: Decision Timeline + Alerts */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2">
+            <DecisionTimeline maxItems={10} />
+          </div>
+          <WatchlistAlerts maxItems={8} />
+        </div>
       </div>
     </div>
   )
