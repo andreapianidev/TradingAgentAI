@@ -193,10 +193,15 @@ export async function GET() {
     )
 
     // Get total database size
-    const { data: sizeData } = await supabase
-      .rpc('get_trading_tables_size')
-      .single()
-      .catch(() => ({ data: null }))
+    let sizeData: any = null
+    try {
+      const result = await supabase
+        .rpc('get_trading_tables_size')
+        .single()
+      sizeData = result.data
+    } catch (error) {
+      console.warn('Could not fetch database size:', error)
+    }
 
     const totalSize = Number(sizeData?.trading_tables_size || 0)
     const totalDbSize = Number(sizeData?.total_database_size || 0)
