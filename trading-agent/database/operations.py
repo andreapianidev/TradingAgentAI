@@ -215,14 +215,6 @@ class DatabaseOperations:
         """Get recent news events."""
         return supabase_ops.get_recent_news(symbol=symbol, limit=limit)
 
-    def save_news_batch(self, news_items: List[Dict[str, Any]]) -> int:
-        """Save multiple news items, avoiding duplicates by URL."""
-        return supabase_ops.save_news_batch(news_items)
-
-    def save_analyzed_news_batch(self, analyzed_items: List[Dict[str, Any]]) -> int:
-        """Save AI-analyzed news items with enhanced sentiment data."""
-        return supabase_ops.save_analyzed_news_batch(analyzed_items)
-
     # ============== Statistics ==============
 
     def get_trading_stats(self) -> Dict[str, Any]:
@@ -237,114 +229,6 @@ class DatabaseOperations:
     ) -> Dict[str, Any]:
         """Sync positions from Alpaca to database."""
         return supabase_ops.sync_positions_from_alpaca(alpaca_positions)
-
-    # ============== Cost Tracking ==============
-
-    def save_llm_cost(
-        self,
-        symbol: str,
-        input_tokens: int,
-        output_tokens: int,
-        cost_usd: float,
-        cached_tokens: int = 0,
-        model: str = None,
-        decision_id: str = None,
-        details: Dict[str, Any] = None
-    ) -> str:
-        """Save LLM API cost record."""
-        return supabase_ops.save_llm_cost(
-            symbol=symbol,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cost_usd=cost_usd,
-            cached_tokens=cached_tokens,
-            model=model,
-            decision_id=decision_id,
-            details=details
-        )
-
-    def save_trading_fee(
-        self,
-        symbol: str,
-        trade_value_usd: float,
-        fee_usd: float,
-        fee_type: str = "taker",
-        position_id: str = None,
-        estimated_fee_usd: float = None
-    ) -> str:
-        """Save trading fee record."""
-        return supabase_ops.save_trading_fee(
-            symbol=symbol,
-            trade_value_usd=trade_value_usd,
-            fee_usd=fee_usd,
-            fee_type=fee_type,
-            position_id=position_id,
-            estimated_fee_usd=estimated_fee_usd
-        )
-
-    def get_cost_totals(
-        self,
-        start_date: datetime,
-        end_date: datetime = None
-    ) -> Dict[str, Any]:
-        """Get aggregated cost totals for a date range."""
-        return supabase_ops.get_cost_totals(
-            start_date=start_date,
-            end_date=end_date
-        )
-
-    # ============== Settings ==============
-
-    def get_setting(self, key: str) -> Any:
-        """Get a setting value by key."""
-        return supabase_ops.get_setting(key)
-
-    # ============== AI Analysis ==============
-
-    def should_generate_analysis(self, symbol: str) -> bool:
-        """Check if we need to generate new analysis today."""
-        return supabase_ops.should_generate_analysis(symbol)
-
-    def save_ai_analysis(
-        self,
-        symbol: str,
-        summary_text: str,
-        market_outlook: str,
-        confidence_score: float,
-        key_levels: Dict[str, Any] = None,
-        risk_factors: List[str] = None,
-        opportunities: List[str] = None,
-        trend_strength: str = None,
-        momentum: str = None,
-        volatility_level: str = None,
-        indicators_snapshot: Dict[str, Any] = None,
-        news_sentiment_summary: Dict[str, Any] = None
-    ) -> str:
-        """Save daily AI-generated market analysis."""
-        return supabase_ops.save_ai_analysis(
-            symbol=symbol,
-            summary_text=summary_text,
-            market_outlook=market_outlook,
-            confidence_score=confidence_score,
-            key_levels=key_levels,
-            risk_factors=risk_factors,
-            opportunities=opportunities,
-            trend_strength=trend_strength,
-            momentum=momentum,
-            volatility_level=volatility_level,
-            indicators_snapshot=indicators_snapshot,
-            news_sentiment_summary=news_sentiment_summary
-        )
-
-    def get_latest_ai_analysis(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """Get the most recent AI analysis for a symbol."""
-        return supabase_ops.get_latest_ai_analysis(symbol)
-
-    # ============== Trading Strategies ==============
-
-    def get_active_strategy(self) -> Optional[Dict[str, Any]]:
-        """Get the currently active trading strategy from the database."""
-        return supabase_ops.get_active_strategy()
 
 
 # Global operations instance

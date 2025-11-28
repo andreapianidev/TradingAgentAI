@@ -12,7 +12,6 @@ from config.constants import (
     EXIT_SIGNAL_REVERSAL
 )
 from exchange.exchange_factory import get_exchange_client
-from core.cost_tracker import calculate_trading_fee
 from utils.logger import get_logger, log_execution
 
 logger = get_logger(__name__)
@@ -156,24 +155,6 @@ class OrderManager:
                 entry_trade_id=trade_id
             )
 
-            # Save trading fee
-            try:
-                trade_value = float(result.get("entry_price", 0)) * float(result.get("quantity", 0))
-                actual_fee, estimated_fee = calculate_trading_fee(
-                    trade_value_usd=trade_value,
-                    is_paper=self.is_paper_trading
-                )
-                db_ops.save_trading_fee(
-                    symbol=symbol,
-                    trade_value_usd=trade_value,
-                    fee_usd=actual_fee,
-                    fee_type="taker",
-                    estimated_fee_usd=estimated_fee
-                )
-                logger.debug(f"Saved open trading fee: ${actual_fee:.6f} (est. live: ${estimated_fee:.6f})")
-            except Exception as e:
-                logger.warning(f"Failed to save trading fee: {e}")
-
             log_execution(
                 symbol=symbol,
                 action=f"OPEN {direction.upper()}",
@@ -256,26 +237,6 @@ class OrderManager:
                     exit_reason=EXIT_SIGNAL_REVERSAL,
                     exit_trade_id=trade_id
                 )
-
-                # Save trading fee for close
-                try:
-                    qty = float(db_position.quantity) if hasattr(db_position, 'quantity') else 0
-                    trade_value = float(result.get("exit_price", 0)) * qty
-                    actual_fee, estimated_fee = calculate_trading_fee(
-                        trade_value_usd=trade_value,
-                        is_paper=self.is_paper_trading
-                    )
-                    db_ops.save_trading_fee(
-                        symbol=symbol,
-                        trade_value_usd=trade_value,
-                        fee_usd=actual_fee,
-                        fee_type="taker",
-                        position_id=str(db_position.id) if hasattr(db_position, 'id') else None,
-                        estimated_fee_usd=estimated_fee
-                    )
-                    logger.debug(f"Saved close trading fee: ${actual_fee:.6f} (est. live: ${estimated_fee:.6f})")
-                except Exception as e:
-                    logger.warning(f"Failed to save close trading fee: {e}")
 
             log_execution(
                 symbol=symbol,

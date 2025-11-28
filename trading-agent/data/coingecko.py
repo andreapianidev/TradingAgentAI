@@ -4,7 +4,6 @@ Free tier: 10-50 calls/minute without API key.
 """
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
-import time
 
 import httpx
 
@@ -14,9 +13,6 @@ logger = get_logger(__name__)
 
 # Cache duration in seconds (5 minutes to respect rate limits)
 CACHE_DURATION = 300
-
-# Rate limit backoff time in seconds
-RATE_LIMIT_BACKOFF = 60
 
 # CoinGecko coin IDs mapping
 COINGECKO_IDS = {
@@ -43,21 +39,6 @@ class CoinGeckoCollector:
         self._trending_cache_time: Optional[datetime] = None
         self._market_cache: Dict[str, Dict[str, Any]] = {}
         self._market_cache_time: Dict[str, datetime] = {}
-        self._rate_limited_until: Optional[datetime] = None
-
-    def _is_rate_limited(self) -> bool:
-        """Check if we're currently rate limited."""
-        if self._rate_limited_until is None:
-            return False
-        if datetime.utcnow() >= self._rate_limited_until:
-            self._rate_limited_until = None
-            return False
-        return True
-
-    def _set_rate_limited(self):
-        """Set rate limit backoff."""
-        self._rate_limited_until = datetime.utcnow() + timedelta(seconds=RATE_LIMIT_BACKOFF)
-        logger.warning(f"CoinGecko rate limited. Backing off for {RATE_LIMIT_BACKOFF}s")
 
     def _is_cache_valid(self, cache_time: Optional[datetime]) -> bool:
         """Check if cache is still valid."""
@@ -76,11 +57,6 @@ class CoinGeckoCollector:
         if self._is_cache_valid(self._global_cache_time) and self._global_cache:
             logger.debug("Using cached global data")
             return self._global_cache
-
-        # Check rate limit
-        if self._is_rate_limited():
-            logger.debug("CoinGecko rate limited, returning cached data")
-            return self._global_cache if self._global_cache else self._default_global()
 
         try:
             with httpx.Client(timeout=self.TIMEOUT) as client:
@@ -110,10 +86,7 @@ class CoinGeckoCollector:
                 return result
 
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429:
-                self._set_rate_limited()
-            else:
-                logger.warning(f"CoinGecko API error: {e.response.status_code}")
+            logger.warning(f"CoinGecko API error: {e.response.status_code}")
         except httpx.TimeoutException:
             logger.warning(f"CoinGecko timeout (>{self.TIMEOUT}s)")
         except Exception as e:
@@ -135,10 +108,6 @@ class CoinGeckoCollector:
         if self._is_cache_valid(self._trending_cache_time) and self._trending_cache:
             logger.debug("Using cached trending data")
             return self._trending_cache
-
-        # Check rate limit
-        if self._is_rate_limited():
-            return self._trending_cache if self._trending_cache else []
 
         try:
             with httpx.Client(timeout=self.TIMEOUT) as client:
@@ -170,10 +139,7 @@ class CoinGeckoCollector:
                 return trending
 
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429:
-                self._set_rate_limited()
-            else:
-                logger.warning(f"CoinGecko trending API error: {e.response.status_code}")
+            logger.warning(f"CoinGecko trending API error: {e.response.status_code}")
         except httpx.TimeoutException:
             logger.warning(f"CoinGecko trending timeout (>{self.TIMEOUT}s)")
         except Exception as e:
@@ -210,10 +176,6 @@ class CoinGeckoCollector:
         )
         if all_cached:
             logger.debug("Using cached market data")
-            return {s: self._market_cache.get(s, {}) for s in symbols}
-
-        # Check rate limit
-        if self._is_rate_limited():
             return {s: self._market_cache.get(s, {}) for s in symbols}
 
         try:
@@ -273,10 +235,7 @@ class CoinGeckoCollector:
                 return result
 
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429:
-                self._set_rate_limited()
-            else:
-                logger.warning(f"CoinGecko market API error: {e.response.status_code}")
+            logger.warning(f"CoinGecko market API error: {e.response.status_code}")
         except httpx.TimeoutException:
             logger.warning(f"CoinGecko market timeout (>{self.TIMEOUT}s)")
         except Exception as e:
@@ -298,45 +257,19 @@ class CoinGeckoCollector:
     def get_market_summary(self, symbols: List[str] = None) -> Dict[str, Any]:
         """
         Get a complete market summary including global data, trending, and specific coins.
-        Returns partial data if some API calls fail.
 
         Args:
             symbols: Optional list of symbols to include
 
         Returns:
-            Complete market summary dictionary (may have empty sections on errors)
+            Complete market summary dictionary
         """
         if symbols is None:
             symbols = ["BTC", "ETH", "SOL"]
 
-        # Get each data source independently - failures don't affect others
-        global_data = {}
-        trending = []
-        market_data = {}
-        errors = []
-
-        try:
-            global_data = self.get_global_data()
-            if global_data.get("error"):
-                errors.append("global")
-        except Exception as e:
-            logger.warning(f"Failed to get global data: {e}")
-            errors.append("global")
-            global_data = self._default_global()
-
-        try:
-            trending = self.get_trending_coins()
-        except Exception as e:
-            logger.warning(f"Failed to get trending coins: {e}")
-            errors.append("trending")
-            trending = []
-
-        try:
-            market_data = self.get_market_data(symbols)
-        except Exception as e:
-            logger.warning(f"Failed to get market data: {e}")
-            errors.append("market")
-            market_data = {}
+        global_data = self.get_global_data()
+        trending = self.get_trending_coins()
+        market_data = self.get_market_data(symbols)
 
         # Check if any of our tracked symbols are trending
         tracked_trending = []
@@ -345,7 +278,7 @@ class CoinGeckoCollector:
             if symbol in trending_symbols:
                 tracked_trending.append(symbol)
 
-        result = {
+        return {
             "global": global_data,
             "trending": trending,
             "trending_symbols": trending_symbols,
@@ -353,12 +286,6 @@ class CoinGeckoCollector:
             "coins": market_data,
             "timestamp": datetime.utcnow().isoformat(),
         }
-
-        if errors:
-            result["partial_errors"] = errors
-            logger.debug(f"CoinGecko returned partial data. Failed: {errors}")
-
-        return result
 
     def _default_global(self) -> Dict[str, Any]:
         """Return default global data when API fails."""

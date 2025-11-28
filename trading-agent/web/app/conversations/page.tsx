@@ -19,7 +19,9 @@ import {
   ArrowDownRight,
   Minus,
   Copy,
-  Check
+  Check,
+  Newspaper,
+  ExternalLink
 } from 'lucide-react'
 
 // Types for LLM conversation data
@@ -47,14 +49,28 @@ interface LLMResponse {
   }
 }
 
+interface NewsItem {
+  id: string
+  created_at: string
+  published_at: string
+  title: string
+  summary?: string
+  url?: string
+  source?: string
+  sentiment?: string
+  symbols?: string[]
+}
+
 interface ConversationPair {
   id: string
   symbol: string
   timestamp: string
+  type: 'llm' | 'news'
   request?: TradingBotLog
   response?: TradingBotLog
   requestDetails?: LLMRequest
   responseDetails?: LLMResponse
+  newsItem?: NewsItem
 }
 
 // Animation variants
@@ -100,34 +116,42 @@ export default function ConversationsPage() {
   const fetchConversations = useCallback(async () => {
     try {
       // Fetch LLM logs (both requests and responses)
-      const { data, error } = await supabase
+      const { data: llmData, error: llmError } = await supabase
         .from('trading_bot_logs')
         .select('*')
         .eq('component', 'llm')
         .order('created_at', { ascending: false })
         .limit(200)
 
-      if (error) {
-        console.error('Error fetching conversations:', error)
-        return
+      if (llmError) {
+        console.error('Error fetching LLM conversations:', llmError)
       }
 
-      if (!data) {
-        setConversations([])
-        return
+      // Fetch news from trading_news table
+      const { data: newsData, error: newsError } = await supabase
+        .from('trading_news')
+        .select('*')
+        .order('published_at', { ascending: false })
+        .limit(100)
+
+      if (newsError) {
+        console.error('Error fetching news:', newsError)
       }
 
       // Group requests and responses into conversation pairs
       const pairs: ConversationPair[] = []
       const processedIds = new Set<string>()
 
+      const data = llmData || []
+
+      // Process requests first to properly match them with responses
       for (const log of data) {
         if (processedIds.has(log.id)) continue
 
         const details = log.details as LLMRequest | LLMResponse | null
 
         if (details?.type === 'llm_request') {
-          // Find matching response (next log with same symbol and type llm_response)
+          // Find matching response (response that comes after request in time)
           const responseLog = data.find(
             l => l.symbol === log.symbol &&
                  !processedIds.has(l.id) &&
@@ -141,6 +165,7 @@ export default function ConversationsPage() {
             id: log.id,
             symbol: log.symbol || 'Unknown',
             timestamp: log.created_at,
+            type: 'llm',
             request: log,
             response: responseLog,
             requestDetails: details as LLMRequest,
@@ -149,18 +174,43 @@ export default function ConversationsPage() {
 
           processedIds.add(log.id)
           if (responseLog) processedIds.add(responseLog.id)
-        } else if (details?.type === 'llm_response' && !processedIds.has(log.id)) {
-          // Orphan response (no matching request found)
+        }
+      }
+
+      // Then process any orphan responses (responses without matching requests)
+      for (const log of data) {
+        if (processedIds.has(log.id)) continue
+
+        const details = log.details as LLMRequest | LLMResponse | null
+
+        if (details?.type === 'llm_response') {
           pairs.push({
             id: log.id,
             symbol: log.symbol || 'Unknown',
             timestamp: log.created_at,
+            type: 'llm',
             response: log,
             responseDetails: details as LLMResponse
           })
           processedIds.add(log.id)
         }
       }
+
+      // Process news items
+      if (newsData && newsData.length > 0) {
+        for (const news of newsData) {
+          pairs.push({
+            id: news.id,
+            symbol: 'NEWS',
+            timestamp: news.published_at || news.created_at,
+            type: 'news',
+            newsItem: news
+          })
+        }
+      }
+
+      // Sort all items by timestamp (newest first)
+      pairs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
 
       // Filter by symbol if needed
       const filtered = symbolFilter === 'all'
@@ -205,6 +255,7 @@ export default function ConversationsPage() {
   }
 
   const getActionIcon = (action?: string, direction?: string) => {
+    if (action === 'news_analysis') return <MessageSquare className="w-4 h-4 text-blue-500" />
     if (action === 'hold') return <Minus className="w-4 h-4 text-gray-500" />
     if (action === 'open') {
       return direction === 'long'
@@ -221,6 +272,7 @@ export default function ConversationsPage() {
 
   const getActionColor = (action?: string) => {
     switch (action) {
+      case 'news_analysis': return 'text-blue-500 bg-blue-500/10 border-blue-500/30'
       case 'open': return 'text-green-500 bg-green-500/10 border-green-500/30'
       case 'close': return 'text-red-500 bg-red-500/10 border-red-500/30'
       case 'hold': return 'text-gray-400 bg-gray-500/10 border-gray-500/30'
@@ -315,11 +367,12 @@ export default function ConversationsPage() {
 
       {/* Stats */}
       <motion.div
-        className="grid grid-cols-2 md:grid-cols-4 gap-4"
+        className="grid grid-cols-2 md:grid-cols-5 gap-4"
         variants={containerVariants}
       >
         {[
-          { label: 'Total Conversations', value: conversations.length, icon: MessageSquare, color: 'text-purple-400' },
+          { label: 'Total Items', value: conversations.length, icon: MessageSquare, color: 'text-purple-400' },
+          { label: 'News Articles', value: conversations.filter(c => c.type === 'news').length, icon: Newspaper, color: 'text-blue-400' },
           { label: 'Open Decisions', value: conversations.filter(c => c.responseDetails?.parsed_decision?.action === 'open').length, icon: ArrowUpRight, color: 'text-green-400' },
           { label: 'Close Decisions', value: conversations.filter(c => c.responseDetails?.parsed_decision?.action === 'close').length, icon: ArrowDownRight, color: 'text-red-400' },
           { label: 'Hold Decisions', value: conversations.filter(c => c.responseDetails?.parsed_decision?.action === 'hold').length, icon: Minus, color: 'text-gray-400' }
@@ -386,6 +439,7 @@ export default function ConversationsPage() {
             {conversations.map((conv, index) => {
               const isExpanded = expandedIds.has(conv.id)
               const decision = conv.responseDetails?.parsed_decision
+              const isNews = conv.type === 'news'
 
               return (
                 <motion.div
@@ -404,15 +458,38 @@ export default function ConversationsPage() {
                   >
                     <div className="flex items-center gap-4">
                       <motion.div
-                        className="p-2 bg-purple-500/20 rounded-lg"
+                        className={cn(
+                          "p-2 rounded-lg",
+                          isNews ? "bg-blue-500/20" : "bg-purple-500/20"
+                        )}
                         whileHover={{ rotate: 15 }}
                       >
-                        <Cpu className="w-5 h-5 text-purple-400" />
+                        {isNews ? (
+                          <Newspaper className="w-5 h-5 text-blue-400" />
+                        ) : (
+                          <Cpu className="w-5 h-5 text-purple-400" />
+                        )}
                       </motion.div>
 
                       <div>
                         <div className="flex items-center gap-3">
-                          <span className="font-bold text-white text-lg">{conv.symbol}</span>
+                          {isNews ? (
+                            <>
+                              <span className="font-bold text-blue-400 text-lg">NEWS</span>
+                              {conv.newsItem?.sentiment && (
+                                <span className={cn(
+                                  'px-2 py-0.5 rounded-md text-xs font-medium border',
+                                  conv.newsItem.sentiment === 'positive' ? 'text-green-500 bg-green-500/10 border-green-500/30' :
+                                  conv.newsItem.sentiment === 'negative' ? 'text-red-500 bg-red-500/10 border-red-500/30' :
+                                  'text-gray-400 bg-gray-500/10 border-gray-500/30'
+                                )}>
+                                  {conv.newsItem.sentiment.toUpperCase()}
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <span className="font-bold text-white text-lg">{conv.symbol}</span>
                           {decision && (
                             <span className={cn(
                               'px-2 py-0.5 rounded-md text-xs font-medium border flex items-center gap-1',
@@ -423,17 +500,39 @@ export default function ConversationsPage() {
                               {decision.direction && ` ${decision.direction.toUpperCase()}`}
                             </span>
                           )}
-                          {decision?.confidence && (
-                            <span className="text-sm text-gray-400">
-                              {(decision.confidence * 100).toFixed(0)}% confidence
-                            </span>
+                              {decision?.confidence && (
+                                <span className="text-sm text-gray-400">
+                                  {(decision.confidence * 100).toFixed(0)}% confidence
+                                </span>
+                              )}
+                            </>
                           )}
                         </div>
                         <div className="flex items-center gap-2 text-sm text-gray-500 mt-1">
-                          <span>{formatTimeAgo(conv.timestamp)}</span>
-                          <span className="text-gray-600">|</span>
-                          <span>{formatDate(conv.timestamp)}</span>
+                          {isNews && conv.newsItem?.title && (
+                            <span className="text-white text-sm line-clamp-1">{conv.newsItem.title}</span>
+                          )}
+                          {!isNews && (
+                            <>
+                              <span>{formatTimeAgo(conv.timestamp)}</span>
+                              <span className="text-gray-600">|</span>
+                              <span>{formatDate(conv.timestamp)}</span>
+                            </>
+                          )}
                         </div>
+                        {isNews && (
+                          <div className="flex items-center gap-2 text-sm text-gray-500 mt-1">
+                            <span>{formatTimeAgo(conv.timestamp)}</span>
+                            <span className="text-gray-600">|</span>
+                            <span>{formatDate(conv.timestamp)}</span>
+                            {conv.newsItem?.source && (
+                              <>
+                                <span className="text-gray-600">|</span>
+                                <span className="text-blue-400">{conv.newsItem.source}</span>
+                              </>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -456,8 +555,57 @@ export default function ConversationsPage() {
                         className="border-t border-gray-800"
                       >
                         <div className="p-4 space-y-4">
+                          {/* News Content */}
+                          {isNews && conv.newsItem && (
+                            <div className="space-y-3">
+                              <div className="bg-blue-900/20 rounded-lg p-4 border border-blue-800/30">
+                                <h3 className="text-lg font-semibold text-white mb-2">{conv.newsItem.title}</h3>
+                                {conv.newsItem.summary && (
+                                  <p className="text-gray-300 text-sm mb-3 leading-relaxed">{conv.newsItem.summary}</p>
+                                )}
+                                <div className="flex items-center gap-4 text-sm text-gray-400">
+                                  {conv.newsItem.source && (
+                                    <span className="text-blue-400">{conv.newsItem.source}</span>
+                                  )}
+                                  {conv.newsItem.published_at && (
+                                    <>
+                                      <span className="text-gray-600">|</span>
+                                      <span>{formatDate(conv.newsItem.published_at)}</span>
+                                    </>
+                                  )}
+                                  {conv.newsItem.sentiment && (
+                                    <>
+                                      <span className="text-gray-600">|</span>
+                                      <span className={cn(
+                                        'font-medium',
+                                        conv.newsItem.sentiment === 'positive' ? 'text-green-400' :
+                                        conv.newsItem.sentiment === 'negative' ? 'text-red-400' :
+                                        'text-gray-400'
+                                      )}>
+                                        Sentiment: {conv.newsItem.sentiment}
+                                      </span>
+                                    </>
+                                  )}
+                                </div>
+                                {conv.newsItem.url && (
+                                  <motion.a
+                                    href={conv.newsItem.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-2 mt-3 px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 rounded-lg text-sm text-blue-400 transition-colors"
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5" />
+                                    Read Full Article
+                                  </motion.a>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
                           {/* Request Section */}
-                          {conv.requestDetails && (
+                          {!isNews && conv.requestDetails && (
                             <div className="space-y-2">
                               <div className="flex items-center gap-2 text-sm font-medium text-blue-400">
                                 <User className="w-4 h-4" />
@@ -526,7 +674,7 @@ export default function ConversationsPage() {
                           )}
 
                           {/* Response Section */}
-                          {conv.responseDetails && (
+                          {!isNews && conv.responseDetails && (
                             <div className="space-y-2">
                               <div className="flex items-center gap-2 text-sm font-medium text-green-400">
                                 <Bot className="w-4 h-4" />
@@ -653,7 +801,7 @@ export default function ConversationsPage() {
                           )}
 
                           {/* No response warning */}
-                          {!conv.responseDetails && (
+                          {!isNews && !conv.responseDetails && (
                             <div className="bg-yellow-900/20 rounded-lg p-3 border border-yellow-800/30">
                               <p className="text-sm text-yellow-400">
                                 Response not found or still pending...

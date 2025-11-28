@@ -283,7 +283,7 @@ export default function DecisionDetailsModal({
                     <span className="text-gray-400">Price</span>
                     <span className="font-medium text-white">
                       {formatCurrency(context.price)}
-                      {context.price_change_24h !== undefined && (
+                      {context.price_change_24h != null && (
                         <span className={`ml-2 text-sm ${
                           context.price_change_24h >= 0 ? 'text-green-400' : 'text-red-400'
                         }`}>
@@ -358,7 +358,7 @@ export default function DecisionDetailsModal({
                       </span>
                     </div>
                   )}
-                  {context.forecast_change_pct !== undefined && (
+                  {context.forecast_change_pct != null && (
                     <div className="flex items-center justify-between">
                       <span className="text-gray-400">Expected Change</span>
                       <span className={`font-medium ${
@@ -368,7 +368,7 @@ export default function DecisionDetailsModal({
                       </span>
                     </div>
                   )}
-                  {context.forecast_confidence !== undefined && (
+                  {context.forecast_confidence != null && (
                     <div className="flex items-center justify-between">
                       <span className="text-gray-400">Forecast Confidence</span>
                       <span className="font-medium text-white">

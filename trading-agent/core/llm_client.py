@@ -3,7 +3,7 @@ DeepSeek LLM client for trading decisions.
 """
 import json
 import re
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List
 
 import httpx
 
@@ -14,7 +14,6 @@ from config.prompts import (
     get_decision_correction_prompt
 )
 from utils.logger import get_logger, log_trade_decision, log_llm_request, log_llm_response
-from core.cost_tracker import calculate_llm_cost
 
 logger = get_logger(__name__)
 
@@ -60,11 +59,11 @@ class DeepSeekClient:
         forecast: Dict[str, Any],
         orderbook: Dict[str, Any],
         sentiment: Dict[str, Any],
-        news_data: Dict[str, Any],
+        news: List[Dict[str, Any]],
         open_positions: List[Dict[str, Any]],
         whale_flow: Dict[str, Any] = None,
         coingecko: Dict[str, Any] = None
-    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """
         Get trading decision from DeepSeek LLM.
 
@@ -76,25 +75,15 @@ class DeepSeekClient:
             pivot_points: Pivot point levels
             forecast: Prophet forecast
             orderbook: Order book data
-            sentiment: Market sentiment (Fear & Greed Index)
-            news_data: Advanced news analysis data with aggregated sentiment
+            sentiment: Market sentiment
+            news: Recent news
             open_positions: Currently open positions
             whale_flow: Whale capital flow analysis
             coingecko: CoinGecko market data (global, trending, coins)
 
         Returns:
-            Tuple of (decision_dict, usage_metadata)
-            - decision_dict: Trading decision with action, direction, leverage, etc.
-            - usage_metadata: Token usage and cost information
+            Decision dictionary with action, direction, leverage, etc.
         """
-        total_usage = {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "cached_tokens": 0,
-            "cost_usd": 0.0,
-            "calls": 0
-        }
-
         try:
             # Build prompts
             system_prompt = get_system_prompt()
@@ -107,7 +96,7 @@ class DeepSeekClient:
                 forecast=forecast,
                 orderbook=orderbook,
                 sentiment=sentiment,
-                news_data=news_data,
+                news=news,
                 open_positions=open_positions,
                 whale_flow=whale_flow,
                 coingecko=coingecko
@@ -117,20 +106,12 @@ class DeepSeekClient:
             log_llm_request(symbol, system_prompt, user_prompt)
 
             # Make API call
-            response, usage = self._call_api(system_prompt, user_prompt)
-
-            # Accumulate usage
-            if usage:
-                total_usage["input_tokens"] += usage.get("input_tokens", 0)
-                total_usage["output_tokens"] += usage.get("output_tokens", 0)
-                total_usage["cached_tokens"] += usage.get("cached_tokens", 0)
-                total_usage["cost_usd"] += usage.get("cost_usd", 0)
-                total_usage["calls"] += 1
+            response = self._call_api(system_prompt, user_prompt)
 
             if response is None:
                 logger.error("No response from DeepSeek API")
                 log_llm_response(symbol, None, None)
-                return self._default_hold_decision(symbol), total_usage
+                return self._default_hold_decision(symbol)
 
             # Parse response
             decision = self._parse_response(response)
@@ -140,20 +121,13 @@ class DeepSeekClient:
 
             if decision is None:
                 # Try to correct invalid response
-                decision, retry_usage = self._retry_with_correction(
+                decision = self._retry_with_correction(
                     system_prompt, user_prompt, response
                 )
-                # Accumulate retry usage
-                if retry_usage:
-                    total_usage["input_tokens"] += retry_usage.get("input_tokens", 0)
-                    total_usage["output_tokens"] += retry_usage.get("output_tokens", 0)
-                    total_usage["cached_tokens"] += retry_usage.get("cached_tokens", 0)
-                    total_usage["cost_usd"] += retry_usage.get("cost_usd", 0)
-                    total_usage["calls"] += 1
 
             if decision is None:
                 logger.warning("Failed to parse LLM response, defaulting to HOLD")
-                return self._default_hold_decision(symbol), total_usage
+                return self._default_hold_decision(symbol)
 
             # Log the decision
             log_trade_decision(
@@ -164,25 +138,18 @@ class DeepSeekClient:
                 reasoning=decision.get("reasoning", "No reasoning provided")
             )
 
-            return decision, total_usage
+            return decision
 
         except Exception as e:
             logger.error(f"Error getting trading decision: {e}")
-            return self._default_hold_decision(symbol), total_usage
+            return self._default_hold_decision(symbol)
 
     def _call_api(
         self,
         system_prompt: str,
         user_prompt: str
-    ) -> Tuple[Optional[str], Dict[str, Any]]:
-        """
-        Make API call to DeepSeek.
-
-        Returns:
-            Tuple of (content, usage_metadata)
-            - content: Response text or None on error
-            - usage_metadata: Token usage and cost info
-        """
+    ) -> Optional[str]:
+        """Make API call to DeepSeek."""
         try:
             client = self._get_client()
 
@@ -202,37 +169,16 @@ class DeepSeekClient:
             data = response.json()
             content = data["choices"][0]["message"]["content"]
 
-            # Extract token usage from response
-            usage = data.get("usage", {})
-            input_tokens = usage.get("prompt_tokens", 0)
-            output_tokens = usage.get("completion_tokens", 0)
-            cached_tokens = usage.get("prompt_cache_hit_tokens", 0)
-
-            # Calculate cost
-            cost_usd = calculate_llm_cost(input_tokens, output_tokens, cached_tokens)
-
-            usage_metadata = {
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "cached_tokens": cached_tokens,
-                "total_tokens": input_tokens + output_tokens,
-                "cost_usd": cost_usd,
-                "model": self.model,
-                "provider": "deepseek"
-            }
-
             logger.debug(f"DeepSeek response: {content[:200]}...")
-            logger.debug(f"Token usage: {input_tokens} in, {output_tokens} out, ${cost_usd:.6f}")
-
-            return content, usage_metadata
+            return content
 
         except httpx.HTTPStatusError as e:
             logger.error(f"DeepSeek API HTTP error: {e.response.status_code}")
             logger.error(f"Response: {e.response.text}")
-            return None, {}
+            return None
         except Exception as e:
             logger.error(f"DeepSeek API error: {e}")
-            return None, {}
+            return None
 
     def _parse_response(self, response: str) -> Optional[Dict[str, Any]]:
         """Parse JSON response from LLM."""
@@ -269,23 +215,6 @@ class DeepSeekClient:
                     logger.warning("Open action requires valid direction")
                     return None
 
-                # Validate TP/SL fields for open action
-                if not decision.get("stop_loss_pct"):
-                    logger.warning("Open action requires stop_loss_pct")
-                    return None
-
-                if not decision.get("take_profit_pct"):
-                    logger.warning("Open action requires take_profit_pct")
-                    return None
-
-                # Validate tp_sl_reasoning (required for tracking and audit)
-                if not decision.get("tp_sl_reasoning"):
-                    logger.warning(
-                        "Open action requires tp_sl_reasoning - "
-                        "LLM must explain why these TP/SL values were chosen"
-                    )
-                    return None
-
             return decision
 
         except json.JSONDecodeError as e:
@@ -300,13 +229,8 @@ class DeepSeekClient:
         system_prompt: str,
         original_user_prompt: str,
         invalid_response: str
-    ) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
-        """
-        Retry API call with correction prompt.
-
-        Returns:
-            Tuple of (decision, usage_metadata)
-        """
+    ) -> Optional[Dict[str, Any]]:
+        """Retry API call with correction prompt."""
         try:
             correction_prompt = get_decision_correction_prompt(
                 "La risposta non era un JSON valido o mancavano campi richiesti",
@@ -316,16 +240,16 @@ class DeepSeekClient:
             # Combine original prompt with correction
             combined_prompt = f"{original_user_prompt}\n\n{correction_prompt}"
 
-            response, usage = self._call_api(system_prompt, combined_prompt)
+            response = self._call_api(system_prompt, combined_prompt)
 
             if response:
-                return self._parse_response(response), usage
+                return self._parse_response(response)
 
-            return None, usage
+            return None
 
         except Exception as e:
             logger.error(f"Error in retry: {e}")
-            return None, {}
+            return None
 
     def _default_hold_decision(self, symbol: str) -> Dict[str, Any]:
         """Return default HOLD decision."""
@@ -344,7 +268,7 @@ class DeepSeekClient:
     def test_connection(self) -> bool:
         """Test API connection."""
         try:
-            response, usage = self._call_api(
+            response = self._call_api(
                 "You are a helpful assistant.",
                 "Say 'OK' if you can hear me."
             )
@@ -361,9 +285,9 @@ class DeepSeekClient:
         pivot_points: Dict[str, Any],
         forecast: Dict[str, Any],
         sentiment: Dict[str, Any],
-        news_data: Dict[str, Any],
+        news: List[Dict[str, Any]],
         whale_flow: Dict[str, Any] = None
-    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """
         Generate a daily market analysis summary using DeepSeek.
 
@@ -373,14 +297,12 @@ class DeepSeekClient:
             indicators: Technical indicators
             pivot_points: Pivot point levels
             forecast: Prophet forecast
-            sentiment: Market sentiment (Fear & Greed)
-            news_data: Advanced news analysis data from news_analyzer
+            sentiment: Market sentiment
+            news: Recent news articles
             whale_flow: Whale capital flow
 
         Returns:
-            Tuple of (analysis_dict, usage_metadata)
-            - analysis_dict: Analysis with summary, outlook, key levels, etc.
-            - usage_metadata: Token usage and cost information
+            Analysis dictionary with summary, outlook, key levels, etc.
         """
         try:
             system_prompt = """Sei un analista finanziario esperto di criptovalute.
@@ -388,20 +310,12 @@ Genera un'analisi di mercato concisa e professionale in italiano.
 La tua analisi deve essere oggettiva, basata sui dati forniti, e utile per i trader.
 Rispondi SOLO con un JSON valido senza markdown o commenti."""
 
-            # Build advanced news summary from analysis
+            # Build analysis prompt
             news_summary = ""
-            if news_data:
-                agg_sentiment = news_data.get("aggregated_sentiment", {})
-                symbol_sentiment = news_data.get("symbol_sentiment", {})
-                total_analyzed = news_data.get("total_analyzed", 0)
-                high_impact = news_data.get("high_impact_count", 0)
-
-                news_summary = f"""NEWS SENTIMENT (AI-analyzed):
-- Articles analyzed: {total_analyzed}
-- High impact news: {high_impact}
-- Aggregated score: {agg_sentiment.get('score', 0):.2f} ({agg_sentiment.get('label', 'neutral')})
-- {symbol} specific: {symbol_sentiment.get('score', 0):.2f} ({symbol_sentiment.get('label', 'neutral')})
-- Interpretation: {agg_sentiment.get('interpretation', 'N/A')}"""
+            if news:
+                positive = sum(1 for n in news if n.get("sentiment") == "positive")
+                negative = sum(1 for n in news if n.get("sentiment") == "negative")
+                news_summary = f"News sentiment: {positive} positive, {negative} negative, {len(news) - positive - negative} neutral"
 
             whale_summary = ""
             if whale_flow:
@@ -453,25 +367,25 @@ Genera un JSON con questa struttura esatta:
     "opportunities": ["opportunità 1", "opportunità 2"]
 }}"""
 
-            response, usage = self._call_api(system_prompt, user_prompt)
+            response = self._call_api(system_prompt, user_prompt)
 
             if response is None:
                 logger.error("No response from DeepSeek for market analysis")
-                return self._default_analysis(symbol, price, indicators, pivot_points), usage
+                return self._default_analysis(symbol, price, indicators, pivot_points)
 
             # Parse response
             analysis = self._parse_analysis_response(response)
 
             if analysis is None:
                 logger.warning("Failed to parse analysis response, using default")
-                return self._default_analysis(symbol, price, indicators, pivot_points), usage
+                return self._default_analysis(symbol, price, indicators, pivot_points)
 
             logger.info(f"Generated AI analysis for {symbol}: {analysis.get('market_outlook', 'N/A')}")
-            return analysis, usage
+            return analysis
 
         except Exception as e:
             logger.error(f"Error generating market analysis: {e}")
-            return self._default_analysis(symbol, price, indicators, pivot_points), {}
+            return self._default_analysis(symbol, price, indicators, pivot_points)
 
     def _parse_analysis_response(self, response: str) -> Optional[Dict[str, Any]]:
         """Parse JSON response from analysis."""

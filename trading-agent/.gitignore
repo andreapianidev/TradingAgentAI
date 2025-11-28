@@ -59,10 +59,3 @@ htmlcov/
 # Misc
 *.bak
 *.tmp
-
-# Generated models (Prophet forecasts)
-models/
-*.pkl
-
-# Claude Code
-.claude/

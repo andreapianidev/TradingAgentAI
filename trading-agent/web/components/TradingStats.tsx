@@ -82,6 +82,7 @@ export default function TradingStats() {
         .select('*')
         .eq('status', 'closed')
         .not('realized_pnl', 'is', null)
+        .neq('exit_reason', 'DATA_CORRUPT_ZERO_PNL')
 
       if (positions && positions.length > 0) {
         const wins = positions.filter(p => (p.realized_pnl || 0) > 0)

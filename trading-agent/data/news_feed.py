@@ -1,7 +1,5 @@
 """
 News feed parser for crypto news.
-
-Collects news from configurable RSS feeds with deduplication and caching.
 """
 import re
 import hashlib
@@ -12,10 +10,13 @@ from xml.etree import ElementTree
 import httpx
 
 from config.settings import settings
-from config.constants import CACHE_NEWS_DURATION, HTTP_TIMEOUT_RSS
+from config.constants import CACHE_NEWS_DURATION
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Timeout for individual feed requests (seconds)
+FEED_REQUEST_TIMEOUT = 10.0
 
 # Keywords to filter crypto-relevant news
 CRYPTO_KEYWORDS = [
@@ -47,9 +48,17 @@ class NewsFeedCollector:
         self._cache: List[Dict[str, Any]] = []
         self._cache_time: Optional[datetime] = None
         self._seen_hashes: Set[str] = set()  # Track seen news hashes for dedup
-        # Use feeds from settings (configurable via env or Supabase)
-        self.feeds = settings.rss_feeds_list
-        self.max_articles_per_feed = settings.NEWS_MAX_ARTICLES_PER_FEED
+        # Default feeds if not configured - multiple sources for better coverage
+        self.default_feeds = [
+            # Original feeds
+            "https://cointelegraph.com/rss",
+            "https://bitcoinmagazine.com/.rss/full/",
+            # Additional feeds for more coverage
+            "https://www.coindesk.com/arc/outboundfeeds/rss/",
+            "https://decrypt.co/feed",
+            "https://bitcoinist.com/feed/",
+            "https://www.newsbtc.com/feed/",
+        ]
 
     def get_recent_news(self, limit: int = 10) -> List[Dict[str, Any]]:
         """
@@ -93,14 +102,10 @@ class NewsFeedCollector:
         all_news = []
         self._seen_hashes.clear()  # Reset for fresh fetch
 
-        # Use configured feed URL or settings feeds list
-        feeds = [self.feed_url] if self.feed_url else self.feeds
+        # Use configured feed or defaults
+        feeds = [self.feed_url] if self.feed_url else self.default_feeds
         successful_feeds = 0
         failed_feeds = 0
-        successful_sources = []
-        failed_sources = []
-
-        logger.info(f"Fetching news from {len(feeds)} RSS feeds...")
 
         for feed_url in feeds:
             if not feed_url:
@@ -108,53 +113,28 @@ class NewsFeedCollector:
 
             try:
                 news = self._parse_feed(feed_url)
-                # Extract source name for logging
-                try:
-                    from urllib.parse import urlparse
-                    source_name = urlparse(feed_url).netloc.replace("www.", "")
-                except Exception:
-                    source_name = feed_url[:30]
-
                 # Deduplicate while adding
-                added_count = 0
                 for item in news:
                     news_hash = item.get("hash", "")
                     if news_hash and news_hash not in self._seen_hashes:
                         self._seen_hashes.add(news_hash)
                         all_news.append(item)
-                        added_count += 1
                     elif not news_hash:
                         # No hash, add anyway but log
                         all_news.append(item)
-                        added_count += 1
-
                 successful_feeds += 1
-                successful_sources.append(f"{source_name} ({added_count})")
-                logger.debug(f"  OK: {source_name} - {added_count} articles")
             except Exception as e:
                 failed_feeds += 1
-                try:
-                    from urllib.parse import urlparse
-                    source_name = urlparse(feed_url).netloc.replace("www.", "")
-                except Exception:
-                    source_name = feed_url[:30]
-                failed_sources.append(source_name)
-                logger.warning(f"  FAIL: {source_name} - {e}")
+                logger.warning(f"Error fetching feed {feed_url}: {e}")
 
-        # Log summary with sources
-        logger.info(f"RSS Feeds: {successful_feeds}/{len(feeds)} OK | {len(all_news)} total articles")
-        if successful_sources:
-            logger.info(f"  Sources: {', '.join(successful_sources)}")
-        if failed_sources:
-            logger.warning(f"  Failed: {', '.join(failed_sources)}")
+        # Log dedup stats
+        if len(self._seen_hashes) > 0:
+            logger.debug(f"News fetch: {successful_feeds} feeds OK, {failed_feeds} failed, "
+                        f"{len(all_news)} unique articles (deduped from {len(self._seen_hashes)} hashes)")
 
-        # Sort by date and filter for crypto relevance
-        pre_filter_count = len(all_news)
+        # Sort by date and filter
         all_news = self._filter_relevant_news(all_news)
         all_news.sort(key=lambda x: x.get("published_at", ""), reverse=True)
-
-        if pre_filter_count > 0:
-            logger.info(f"  Crypto-relevant: {len(all_news)}/{pre_filter_count} articles passed filter")
 
         return all_news
 
@@ -163,7 +143,7 @@ class NewsFeedCollector:
         news_items = []
 
         try:
-            with httpx.Client(timeout=HTTP_TIMEOUT_RSS) as client:
+            with httpx.Client(timeout=FEED_REQUEST_TIMEOUT) as client:
                 response = client.get(feed_url)
                 response.raise_for_status()
 
@@ -175,13 +155,13 @@ class NewsFeedCollector:
                     # Try Atom format
                     items = root.findall(".//{http://www.w3.org/2005/Atom}entry")
 
-                for item in items[:self.max_articles_per_feed]:  # Limit per feed
+                for item in items[:20]:  # Limit per feed
                     news_item = self._parse_item(item, feed_url)
                     if news_item:
                         news_items.append(news_item)
 
         except httpx.TimeoutException:
-            logger.warning(f"Timeout fetching feed {feed_url} (>{HTTP_TIMEOUT_RSS}s)")
+            logger.warning(f"Timeout fetching feed {feed_url} (>{FEED_REQUEST_TIMEOUT}s)")
         except httpx.HTTPStatusError as e:
             logger.warning(f"HTTP error fetching feed {feed_url}: {e.response.status_code}")
         except Exception as e:
@@ -330,20 +310,4 @@ news_collector = NewsFeedCollector()
 
 def get_recent_news(limit: int = 5) -> List[Dict[str, Any]]:
     """Convenience function to get recent news."""
-    return news_collector.get_recent_news(limit)
-
-
-def get_news_for_analysis(limit: int = 30) -> List[Dict[str, Any]]:
-    """
-    Get news items for advanced analysis.
-
-    This returns more items without limit filtering,
-    intended for the advanced news analyzer to process.
-
-    Args:
-        limit: Maximum number of items
-
-    Returns:
-        List of raw news items for analysis
-    """
     return news_collector.get_recent_news(limit)

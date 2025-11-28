@@ -33,6 +33,7 @@ import {
 } from 'lucide-react'
 import { cn, formatCurrency, formatPercent } from '@/lib/utils'
 import { supabase, TradingDecision, TradingPortfolioSnapshot, TradingMarketContext } from '@/lib/supabase'
+import StrategyBadge from '@/components/StrategyBadge'
 
 interface ActivityLog {
   id: string
@@ -896,6 +897,8 @@ export default function BotConsolePage() {
           <span className="text-sm text-gray-500">
             Real-time trading activity
           </span>
+          <div className="h-4 w-px bg-gray-300 dark:bg-gray-700" />
+          <StrategyBadge />
         </div>
 
         <div className="flex items-center gap-2">
@@ -1083,11 +1086,11 @@ export default function BotConsolePage() {
                     <span className="text-xs text-gray-500">{formatCurrency(pos.marketValue)}</span>
                     <span className={cn(
                       "text-xs font-medium px-1.5 py-0.5 rounded",
-                      pos.unrealizedPnl >= 0
+                      (pos.unrealizedPnl ?? 0) >= 0
                         ? "bg-green-500/10 text-green-500"
                         : "bg-red-500/10 text-red-500"
                     )}>
-                      {pos.unrealizedPnl >= 0 ? '+' : ''}{pos.unrealizedPnlPct.toFixed(2)}%
+                      {(pos.unrealizedPnl ?? 0) >= 0 ? '+' : ''}{(pos.unrealizedPnlPct ?? 0).toFixed(2)}%
                     </span>
                   </div>
                 ))}

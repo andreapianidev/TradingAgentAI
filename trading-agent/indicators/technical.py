@@ -62,7 +62,6 @@ class TechnicalIndicators:
             ema2 = self.calculate_ema(EMA_SHORT_PERIOD)
             ema20 = self.calculate_ema(EMA_LONG_PERIOD)
             volume_sma = self.calculate_volume_sma()
-            volatility = self.calculate_volatility_metrics()
 
             # Get latest values
             latest_close = float(self.df["close"].iloc[-1])
@@ -82,14 +81,6 @@ class TechnicalIndicators:
                 "rsi_overbought": rsi > RSI_OVERBOUGHT,
                 "rsi_oversold": rsi < RSI_OVERSOLD,
                 "price_above_ema20": latest_close > ema20 if ema20 else False,
-                # Volatility metrics for dynamic TP/SL
-                "atr_14": volatility["atr_14"],
-                "atr_pct": volatility["atr_pct"],
-                "daily_range_pct": volatility["daily_range_pct"],
-                "avg_range_pct": volatility["avg_range_pct"],
-                "volatility_regime": volatility["volatility_regime"],
-                "suggested_sl_range": volatility["suggested_sl_range"],
-                "suggested_tp_range": volatility["suggested_tp_range"],
             }
 
         except Exception as e:
@@ -112,14 +103,6 @@ class TechnicalIndicators:
             "rsi_overbought": None,
             "rsi_oversold": None,
             "price_above_ema20": None,
-            # Volatility metrics
-            "atr_14": None,
-            "atr_pct": None,
-            "daily_range_pct": None,
-            "avg_range_pct": None,
-            "volatility_regime": "unknown",
-            "suggested_sl_range": "3-5%",
-            "suggested_tp_range": "5-8%",
         }
 
     def calculate_macd(
@@ -320,92 +303,6 @@ class TechnicalIndicators:
         atr = tr.rolling(window=period).mean()
 
         return float(atr.iloc[-1]) if not pd.isna(atr.iloc[-1]) else 0
-
-    def calculate_volatility_metrics(self, atr_period: int = 14) -> Dict[str, Any]:
-        """
-        Calculate volatility metrics for dynamic TP/SL calculation.
-
-        This provides concrete volatility data to help DeepSeek make
-        informed decisions about stop loss and take profit levels.
-
-        Args:
-            atr_period: Period for ATR calculation (default 14)
-
-        Returns:
-            Dictionary with volatility metrics:
-            - atr_14: Average True Range (14 periods)
-            - atr_pct: ATR as percentage of current price
-            - daily_range_pct: Current candle range as % of close
-            - avg_range_pct: Average range over last 14 candles as % of close
-            - volatility_regime: 'low', 'medium', or 'high'
-            - suggested_sl_range: Suggested stop loss percentage range
-            - suggested_tp_range: Suggested take profit percentage range
-        """
-        if self.df.empty or len(self.df) < atr_period + 1:
-            return {
-                "atr_14": None,
-                "atr_pct": None,
-                "daily_range_pct": None,
-                "avg_range_pct": None,
-                "volatility_regime": "unknown",
-                "suggested_sl_range": "3-5%",
-                "suggested_tp_range": "5-8%",
-            }
-
-        try:
-            # Calculate ATR
-            atr_value = self.calculate_atr(atr_period)
-            current_price = float(self.df["close"].iloc[-1])
-
-            # ATR as percentage of price
-            atr_pct = (atr_value / current_price * 100) if current_price > 0 else 0
-
-            # Current candle range as percentage
-            current_high = float(self.df["high"].iloc[-1])
-            current_low = float(self.df["low"].iloc[-1])
-            daily_range_pct = ((current_high - current_low) / current_price * 100) if current_price > 0 else 0
-
-            # Average range over last 14 candles
-            ranges = (self.df["high"] - self.df["low"]).tail(atr_period)
-            avg_range = ranges.mean()
-            avg_range_pct = (avg_range / current_price * 100) if current_price > 0 else 0
-
-            # Classify volatility regime based on ATR%
-            # Crypto markets: <2% = low, 2-4% = medium, >4% = high
-            if atr_pct < 2.0:
-                volatility_regime = "low"
-                suggested_sl_range = "2-3%"
-                suggested_tp_range = "4-6%"
-            elif atr_pct < 4.0:
-                volatility_regime = "medium"
-                suggested_sl_range = "3-5%"
-                suggested_tp_range = "5-8%"
-            else:
-                volatility_regime = "high"
-                suggested_sl_range = "5-7%"
-                suggested_tp_range = "8-12%"
-
-            return {
-                "atr_14": round(atr_value, 2),
-                "atr_pct": round(atr_pct, 2),
-                "daily_range_pct": round(daily_range_pct, 2),
-                "avg_range_pct": round(avg_range_pct, 2),
-                "volatility_regime": volatility_regime,
-                "suggested_sl_range": suggested_sl_range,
-                "suggested_tp_range": suggested_tp_range,
-            }
-
-        except Exception as e:
-            logger.error(f"Error calculating volatility metrics: {e}")
-            return {
-                "atr_14": None,
-                "atr_pct": None,
-                "daily_range_pct": None,
-                "avg_range_pct": None,
-                "volatility_regime": "unknown",
-                "suggested_sl_range": "3-5%",
-                "suggested_tp_range": "5-8%",
-            }
 
     def get_ohlcv_for_forecast(self) -> pd.DataFrame:
         """

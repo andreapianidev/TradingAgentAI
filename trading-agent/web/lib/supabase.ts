@@ -69,16 +69,6 @@ export interface TradingDecision {
   entry_quantity?: number
   order_id?: string
   trading_mode: 'paper' | 'live'
-  // TP/SL tracking fields
-  tp_sl_reasoning?: string
-  tp_sl_adjusted?: boolean
-  tp_sl_adjustment_reason?: string
-  original_tp_pct?: number
-  original_sl_pct?: number
-  // Volatility context at decision time
-  volatility_regime?: 'low' | 'medium' | 'high' | 'unknown'
-  atr_at_decision?: number
-  daily_range_pct?: number
 }
 
 export interface TradingMarketContext {
@@ -161,6 +151,29 @@ export interface TradingSetting {
   setting_value: any
   description?: string
   category: string
+}
+
+export interface TradingStrategy {
+  id: string
+  created_at: string
+  updated_at: string
+  name: string
+  display_name: string
+  description?: string
+  is_active: boolean
+  is_default: boolean
+  config: {
+    max_position_size_pct: number
+    max_total_exposure_pct: number
+    tp_range_min: number
+    tp_range_max: number
+    auto_close_at_profit_pct?: number | null
+    sl_range_min: number
+    sl_range_max: number
+    min_confidence: number
+  }
+  activated_at?: string
+  activation_count: number
 }
 
 export interface TradingCycle {
@@ -362,18 +375,4 @@ export interface TradingBotLog {
   details?: any
   error_stack?: string
   trading_mode: 'paper' | 'live'
-}
-
-export interface TradingTpSlAdjustment {
-  id: string
-  created_at: string
-  position_id?: string
-  decision_id?: string
-  adjustment_type: 'tp' | 'sl' | 'both'
-  old_value_pct?: number
-  new_value_pct?: number
-  old_price?: number
-  new_price?: number
-  reason: string
-  adjusted_by: 'system' | 'validator' | 'user' | 'trailing'
 }

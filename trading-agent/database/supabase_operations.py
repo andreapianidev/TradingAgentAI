@@ -123,20 +123,6 @@ class SupabaseOperations:
         """
         # Store sanitized decision fields (may be null if converted to HOLD)
         # and raw LLM decision in execution_details for analysis
-
-        # Build execution_details with TP/SL reasoning and raw decision
-        execution_details = {}
-        if raw_llm_decision:
-            execution_details["raw_llm_decision"] = raw_llm_decision
-        if decision.get("tp_sl_reasoning"):
-            execution_details["tp_sl_reasoning"] = decision.get("tp_sl_reasoning")
-
-        # Calculate and store R:R ratio for analysis
-        sl = decision.get("stop_loss_pct", 0)
-        tp = decision.get("take_profit_pct", 0)
-        if sl and tp and sl > 0:
-            execution_details["risk_reward_ratio"] = round(tp / sl, 2)
-
         data = {
             "context_id": context_id,
             "symbol": symbol,
@@ -151,7 +137,8 @@ class SupabaseOperations:
             "reasoning": decision.get("reasoning"),
             "execution_status": execution_status,
             "trading_mode": "paper" if settings.PAPER_TRADING else "live",
-            "execution_details": execution_details if execution_details else None
+            # Store raw LLM decision in execution_details for analysis
+            "execution_details": {"raw_llm_decision": raw_llm_decision} if raw_llm_decision else None
         }
 
         result = self.client.table("trading_decisions").insert(data).execute()
@@ -648,110 +635,41 @@ class SupabaseOperations:
 
     def should_generate_analysis(self, symbol: str) -> bool:
         """Check if we need to generate new analysis today."""
-        from datetime import date, datetime
+        from datetime import date
 
-        # Check if analysis already exists for today
         result = self.client.table("trading_ai_analysis") \
             .select("id") \
             .eq("symbol", symbol) \
             .eq("analysis_date", date.today().isoformat()) \
             .execute()
 
-        # Already generated today - don't generate again
         return len(result.data) == 0
 
     # ============== News (Batch) ==============
 
     def save_news_batch(self, news_items: List[Dict[str, Any]]) -> int:
         """
-        Save multiple news items using batch upsert (efficient single query).
-
-        Uses UNIQUE constraint on url for conflict resolution.
+        Save multiple news items, avoiding duplicates by URL.
 
         Returns:
-            Number of news items saved/updated
+            Number of news items saved
         """
         if not news_items:
             return 0
 
-        # Prepare all records for batch upsert
-        records = []
+        saved_count = 0
         for item in news_items:
-            url = item.get("url")
-            if not url:
-                continue
-
-            # Parse published_at if it's a string
-            published_at = item.get("published_at")
-            if isinstance(published_at, str):
-                try:
-                    from dateutil import parser
-                    published_at = parser.parse(published_at).isoformat()
-                except Exception:
-                    published_at = datetime.utcnow().isoformat()
-
-            records.append({
-                "title": item.get("title", "")[:500],
-                "summary": (item.get("summary") or "")[:1000],
-                "source": item.get("source", "RSS Feed"),
-                "url": url,
-                "published_at": published_at,
-                "sentiment": item.get("sentiment", "neutral"),
-                "symbols": item.get("symbols"),
-                "raw_data": item.get("raw_data")
-            })
-
-        if not records:
-            return 0
-
-        try:
-            # Single batch upsert - much more efficient than N individual queries
-            result = self.client.table("trading_news") \
-                .upsert(records, on_conflict="url") \
-                .execute()
-
-            saved_count = len(result.data) if result.data else 0
-            if saved_count > 0:
-                logger.info(f"Batch upserted {saved_count} news items to database")
-            return saved_count
-
-        except Exception as e:
-            logger.warning(f"Batch upsert failed, falling back to individual inserts: {e}")
-            # Fallback to individual inserts if batch fails
-            saved_count = 0
-            for record in records:
-                try:
-                    self.client.table("trading_news") \
-                        .upsert(record, on_conflict="url") \
-                        .execute()
-                    saved_count += 1
-                except Exception as inner_e:
-                    logger.debug(f"Error saving news item: {inner_e}")
-            return saved_count
-
-    def save_analyzed_news_batch(self, analyzed_items: List[Dict[str, Any]]) -> int:
-        """
-        Save AI-analyzed news items with enhanced sentiment data using batch upsert.
-
-        This updates existing news items with AI analysis or creates new entries
-        in a single efficient database operation.
-
-        Args:
-            analyzed_items: List of analyzed news items from news_analyzer
-
-        Returns:
-            Number of items saved/updated
-        """
-        if not analyzed_items:
-            return 0
-
-        # Prepare all records for batch upsert
-        records = []
-        for item in analyzed_items:
             try:
+                # Check if news already exists by URL
                 url = item.get("url")
-                if not url:
-                    continue
+                if url:
+                    existing = self.client.table("trading_news") \
+                        .select("id") \
+                        .eq("url", url) \
+                        .execute()
+
+                    if existing.data:
+                        continue  # Skip duplicate
 
                 # Parse published_at if it's a string
                 published_at = item.get("published_at")
@@ -759,66 +677,30 @@ class SupabaseOperations:
                     try:
                         from dateutil import parser
                         published_at = parser.parse(published_at).isoformat()
-                    except Exception:
+                    except:
                         published_at = datetime.utcnow().isoformat()
 
-                # Build AI analysis data
-                ai_analysis = {
-                    "ai_summary": item.get("summary", ""),
-                    "ai_sentiment": item.get("sentiment", "neutral"),
-                    "ai_sentiment_score": item.get("sentiment_score", 0.0),
-                    "ai_impact_level": item.get("impact_level", "low"),
-                    "ai_affected_symbols": item.get("affected_symbols", []),
-                    "ai_key_points": item.get("key_points", []),
-                    "ai_market_implications": item.get("market_implications", ""),
-                    "analysis_method": item.get("analysis_method", "deepseek"),
-                    "has_full_content": item.get("has_full_content", False),
-                    "content_length": item.get("content_length", 0),
-                    "age_hours": item.get("age_hours", 0),
-                }
-
-                records.append({
+                data = {
                     "title": item.get("title", "")[:500],
-                    "summary": item.get("summary", "")[:1000],
+                    "summary": (item.get("summary") or "")[:1000],
                     "source": item.get("source", "RSS Feed"),
                     "url": url,
                     "published_at": published_at,
                     "sentiment": item.get("sentiment", "neutral"),
-                    "symbols": item.get("affected_symbols"),
-                    "raw_data": ai_analysis
-                })
+                    "symbols": item.get("symbols"),
+                    "raw_data": item.get("raw_data")
+                }
+
+                self.client.table("trading_news").insert(data).execute()
+                saved_count += 1
 
             except Exception as e:
-                logger.debug(f"Error preparing analyzed news item: {e}")
+                logger.debug(f"Error saving news item: {e}")
                 continue
 
-        if not records:
-            return 0
-
-        try:
-            # Single batch upsert - much more efficient than N individual queries
-            result = self.client.table("trading_news") \
-                .upsert(records, on_conflict="url") \
-                .execute()
-
-            saved_count = len(result.data) if result.data else 0
-            if saved_count > 0:
-                logger.info(f"Batch upserted {saved_count} AI-analyzed news items to database")
-            return saved_count
-
-        except Exception as e:
-            logger.warning(f"Batch upsert failed for analyzed news, falling back to individual upserts: {e}")
-            # Fallback to individual upserts if batch fails
-            saved_count = 0
-            for record in records:
-                try:
-                    self.client.table("trading_news") \
-                        .upsert(record, on_conflict="url") \
-                        .execute()
-                    saved_count += 1
-                except Exception as inner_e:
-                    logger.debug(f"Error saving analyzed news item: {inner_e}")
-            return saved_count
+        if saved_count > 0:
+            logger.info(f"Saved {saved_count} news items to database")
+        return saved_count
 
     # ============== Whale Alerts ==============
 
@@ -1134,239 +1016,6 @@ class SupabaseOperations:
 
         except Exception as e:
             logger.warning(f"Failed to save market global data: {e}")
-            return None
-
-
-    # ============== Cost Tracking ==============
-
-    def save_llm_cost(
-        self,
-        symbol: str,
-        input_tokens: int,
-        output_tokens: int,
-        cost_usd: float,
-        cached_tokens: int = 0,
-        model: str = None,
-        decision_id: str = None,
-        details: Dict[str, Any] = None
-    ) -> str:
-        """
-        Save LLM API cost record.
-
-        Returns:
-            ID of the created cost record
-        """
-        data = {
-            "cost_type": "llm",
-            "llm_provider": "deepseek",
-            "llm_model": model or "deepseek-chat",
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "cached_tokens": cached_tokens,
-            "cost_usd": cost_usd,
-            "symbol": symbol,
-            "decision_id": decision_id,
-            "trading_mode": "paper" if settings.PAPER_TRADING else "live",
-            "details": details
-        }
-
-        result = self.client.table("trading_costs").insert(data).execute()
-        cost_id = result.data[0]["id"]
-        logger.debug(f"Saved LLM cost {cost_id}: ${cost_usd:.6f} for {symbol}")
-        return cost_id
-
-    def save_trading_fee(
-        self,
-        symbol: str,
-        trade_value_usd: float,
-        fee_usd: float,
-        fee_type: str = "taker",
-        position_id: str = None,
-        estimated_fee_usd: float = None
-    ) -> str:
-        """
-        Save trading fee record.
-
-        Returns:
-            ID of the created cost record
-        """
-        fee_rate = 0.00075 if not settings.PAPER_TRADING else 0
-
-        data = {
-            "cost_type": "trading_fee",
-            "fee_type": fee_type,
-            "trade_value_usd": trade_value_usd,
-            "fee_rate": fee_rate,
-            "cost_usd": fee_usd,
-            "symbol": symbol,
-            "position_id": position_id,
-            "trading_mode": "paper" if settings.PAPER_TRADING else "live",
-            "details": {"estimated_live_fee_usd": estimated_fee_usd} if estimated_fee_usd else None
-        }
-
-        result = self.client.table("trading_costs").insert(data).execute()
-        cost_id = result.data[0]["id"]
-        logger.debug(f"Saved trading fee {cost_id}: ${fee_usd:.4f} for {symbol}")
-        return cost_id
-
-    def get_costs_by_date_range(
-        self,
-        start_date: str,
-        end_date: str = None,
-        cost_type: str = None,
-        symbol: str = None
-    ) -> List[Dict[str, Any]]:
-        """
-        Get cost records for a date range.
-
-        Args:
-            start_date: Start date (ISO format)
-            end_date: End date (ISO format), defaults to now
-            cost_type: Filter by 'llm' or 'trading_fee'
-            symbol: Filter by symbol
-
-        Returns:
-            List of cost records
-        """
-        query = self.client.table("trading_costs") \
-            .select("*") \
-            .gte("created_at", start_date)
-
-        if end_date:
-            query = query.lte("created_at", end_date)
-
-        if cost_type:
-            query = query.eq("cost_type", cost_type)
-
-        if symbol:
-            query = query.eq("symbol", symbol)
-
-        result = query.order("created_at", desc=True).execute()
-        return result.data
-
-    def get_cost_totals(
-        self,
-        start_date: str,
-        end_date: str = None
-    ) -> Dict[str, Any]:
-        """
-        Get aggregated cost totals for a period.
-
-        Returns:
-            Dictionary with llm and trading fee totals
-        """
-        costs = self.get_costs_by_date_range(start_date, end_date)
-
-        llm_costs = [c for c in costs if c["cost_type"] == "llm"]
-        fee_costs = [c for c in costs if c["cost_type"] == "trading_fee"]
-
-        return {
-            "llm_total_usd": sum(float(c["cost_usd"]) for c in llm_costs),
-            "llm_calls": len(llm_costs),
-            "llm_input_tokens": sum(c.get("input_tokens") or 0 for c in llm_costs),
-            "llm_output_tokens": sum(c.get("output_tokens") or 0 for c in llm_costs),
-            "llm_cached_tokens": sum(c.get("cached_tokens") or 0 for c in llm_costs),
-            "trading_fees_total_usd": sum(float(c["cost_usd"]) for c in fee_costs),
-            "trades_count": len(fee_costs),
-            "total_cost_usd": sum(float(c["cost_usd"]) for c in costs)
-        }
-
-    def get_cost_vs_profit_roi(
-        self,
-        start_date: str,
-        end_date: str = None
-    ) -> Dict[str, Any]:
-        """
-        Calculate ROI comparing costs vs realized profits.
-
-        Args:
-            start_date: Start date (YYYY-MM-DD format)
-            end_date: Optional end date
-
-        Returns:
-            Dictionary with costs, profits, net profit and ROI percentage
-        """
-        # Get total costs for the period
-        cost_totals = self.get_cost_totals(start_date, end_date)
-        total_costs = cost_totals.get('total_cost_usd', 0)
-
-        # Get realized PnL from closed positions
-        query = self.client.table("trading_positions") \
-            .select("realized_pnl, exit_timestamp") \
-            .eq("status", "closed") \
-            .gte("exit_timestamp", f"{start_date}T00:00:00")
-
-        if end_date:
-            query = query.lte("exit_timestamp", f"{end_date}T23:59:59")
-
-        result = query.execute()
-        positions = result.data or []
-
-        # Calculate total realized profit
-        total_profit = sum(float(p.get("realized_pnl") or 0) for p in positions)
-
-        # Calculate net profit and ROI
-        net_profit = total_profit - total_costs
-        roi_pct = ((net_profit / total_costs) * 100) if total_costs > 0 else 0
-
-        return {
-            "total_costs_usd": total_costs,
-            "llm_costs_usd": cost_totals.get('llm_total_usd', 0),
-            "trading_fees_usd": cost_totals.get('trading_fees_total_usd', 0),
-            "realized_profit_usd": total_profit,
-            "net_profit_usd": net_profit,
-            "roi_percentage": roi_pct,
-            "trades_closed": len(positions),
-            "period_start": start_date,
-            "period_end": end_date
-        }
-
-    def update_decision_llm_cost(
-        self,
-        decision_id: str,
-        input_tokens: int,
-        output_tokens: int,
-        cost_usd: float,
-        cached_tokens: int = 0
-    ) -> None:
-        """Update a trading decision with LLM cost info."""
-        self.client.table("trading_decisions") \
-            .update({
-                "llm_input_tokens": input_tokens,
-                "llm_output_tokens": output_tokens,
-                "llm_cached_tokens": cached_tokens,
-                "llm_cost_usd": cost_usd
-            }) \
-            .eq("id", decision_id) \
-            .execute()
-
-        logger.debug(f"Updated decision {decision_id} with LLM cost: ${cost_usd:.6f}")
-
-    # ============== Trading Strategies ==============
-
-    def get_active_strategy(self) -> Optional[Dict[str, Any]]:
-        """
-        Get the currently active trading strategy from the database.
-
-        Returns:
-            Dictionary with strategy data (name, config, etc.) or None if no active strategy
-        """
-        try:
-            result = self.client.table("trading_strategies") \
-                .select("*") \
-                .eq("is_active", True) \
-                .execute()
-
-            if result.data and len(result.data) > 0:
-                strategy = result.data[0]
-                logger.info(f"Loaded active strategy: {strategy['name']}")
-                return strategy
-            else:
-                logger.warning("No active strategy found in database")
-                return None
-
-        except Exception as e:
-            logger.error(f"Error loading active strategy: {e}")
             return None
 
 
