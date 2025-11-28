@@ -81,11 +81,75 @@ PESI DI IMPORTANZA INDICATORI (usa questi per valutare):
 - Sentiment: 0.4 (contesto generale)
 - News: 0.3 (peso basso, mercato crypto meno reattivo alle news)
 
-RISK MANAGEMENT:
-- Stop Loss obbligatorio: -{settings.STOP_LOSS_PCT}% dal prezzo di entrata
-- Take Profit obbligatorio: +{settings.TAKE_PROFIT_PCT}% dal prezzo di entrata
-- In caso di alta volatilità, considera stop loss più stretto (-2%)
-- In caso di trend molto forte, considera take profit più ampio (+7-10%)
+RISK MANAGEMENT DINAMICO (ATR-BASED):
+
+PRINCIPI GENERALI:
+- Stop Loss e Take Profit OBBLIGATORI per ogni posizione
+- Stop Loss deve adattarsi alla volatilità del mercato usando ATR
+- Take Profit deve considerare trend strength e volatilità
+
+CALCOLO STOP LOSS BASATO SU ATR:
+- ATR (Average True Range) misura la volatilità reale del mercato
+- ATR% = (ATR / Prezzo corrente) * 100
+- Volatility Ratio = ATR corrente / ATR medio (30 periodi)
+
+LINEE GUIDA STOP LOSS:
+1. Volatilità NORMALE (Volatility Ratio 0.8-1.2):
+   - Stop Loss: 2.0-3.0 * ATR%
+   - Range tipico: 2.5-4.0% per BTC/ETH, 3.0-5.0% per SOL
+
+2. Volatilità BASSA (Volatility Ratio < 0.8):
+   - Stop Loss: 2.5-3.5 * ATR%
+   - Mercato calmo: stop loss più ampi per evitare exit prematuri
+   - Range tipico: 3.5-5.0%
+
+3. Volatilità ALTA (Volatility Ratio > 1.2):
+   - Stop Loss: 1.5-2.5 * ATR%
+   - Mercato agitato: stop loss più stretti per proteggere capitale
+   - Range tipico: 2.0-3.5%
+   - IMPORTANTE: in volatilità estrema (>1.5), considera di NON aprire posizioni se confidenza < 0.75
+
+4. Volatilità ESTREMA (Volatility Ratio > 1.5):
+   - Stop Loss: 1.5-2.0 * ATR%
+   - Range: 1.5-3.0%
+   - Considera HOLD se confidenza < 0.8
+
+LINEE GUIDA TAKE PROFIT:
+- Take Profit minimo: 1.5x lo Stop Loss (risk/reward ratio)
+- Trend forte + volatilità normale: TP = 3-4x Stop Loss (7-10%)
+- Trend debole + volatilità alta: TP = 2x Stop Loss (4-6%)
+
+ADATTAMENTO PER MODALITÀ TRADING:
+- PAPER TRADING: Puoi essere più aggressivo
+  * Stop Loss: range inferiore (es. 1.5-2.0 * ATR%)
+  * Take Profit: range superiore (8-12%)
+  * Accetta Volatility Ratio fino a 1.8 con confidenza 0.7+
+
+- LIVE TRADING: Sii più conservativo
+  * Stop Loss: range superiore (es. 2.5-3.5 * ATR%)
+  * Take Profit: più realistico (5-8%)
+  * Evita aperture con Volatility Ratio > 1.5 a meno di confidenza > 0.85
+
+LIMITI ASSOLUTI (indipendentemente da ATR):
+- Stop Loss minimo: 1.5%
+- Stop Loss massimo: 6.0%
+- Take Profit minimo: 3.0%
+- Take Profit massimo: 15.0%
+
+ESEMPI PRATICI:
+Scenario 1: BTC @ $50,000, ATR = $800 (1.6%), Volatility Ratio = 1.0 (normale)
+→ Stop Loss raccomandato: 2.5 * 1.6% = 4.0% → -$2,000
+→ Take Profit raccomandato: 3x SL = 12% → +$6,000
+
+Scenario 2: ETH @ $3,000, ATR = $150 (5.0%), Volatility Ratio = 1.5 (alta)
+→ Stop Loss raccomandato: 2.0 * 5.0% = 10% → CLAMP a 6.0% max = -$180
+→ Take Profit raccomandato: 2x SL = 12% → +$360
+→ ATTENZIONE: Valuta HOLD se confidenza < 0.75
+
+DECISIONE FINALE:
+- Analizza ATR%, Volatility Ratio, Trading Mode
+- Calcola stop_loss_pct e take_profit_pct ottimali
+- Spiega nel reasoning: "ATR analysis: [valori] → SL=[X]%, TP=[Y]% (volatility [normal/high/low])"
 
 OUTPUT RICHIESTO:
 Rispondi ESCLUSIVAMENTE con un JSON valido in questo formato esatto:
@@ -225,6 +289,18 @@ NOTA: Operiamo su Alpaca (spot trading, NO leva). Leverage sempre = 1.
 - EMA20: ${indicators.get('ema20', 0):.2f}
 - Volume SMA: {indicators.get('volume_sma', 0):,.0f}
 
+📊 VOLATILITY ANALYSIS (ATR):
+- ATR (14): {indicators.get('atr', 0):.2f}
+- ATR (30): {indicators.get('atr_30', 0):.2f}
+- ATR as % of Price: {indicators.get('atr_pct', 0):.2f}%
+- Volatility Ratio (ATR/ATR_30): {indicators.get('volatility_ratio', 1.0):.2f}
+- Volatility Status: {_get_volatility_status(indicators.get('volatility_ratio', 1.0))}
+- Trading Mode: {'PAPER' if portfolio.get('is_paper', True) else 'LIVE'}
+
+Recommended SL/TP ranges based on ATR:
+- Stop Loss range: {_get_atr_sl_range(indicators.get('atr_pct', 0), indicators.get('volatility_ratio', 1.0))}
+- Take Profit range: {_get_atr_tp_range(indicators.get('atr_pct', 0), indicators.get('volatility_ratio', 1.0))}
+
 🎯 PIVOT POINTS:
 - PP (Pivot Point): ${pivot_points.get('pp', 0):.2f}
 - R1: ${pivot_points.get('r1', 0):.2f}
@@ -318,3 +394,55 @@ Per favore rispondi nuovamente con SOLO un JSON valido nel formato richiesto:
 
 IMPORTANTE: leverage deve essere SEMPRE 1 (Alpaca non supporta leva).
 NON includere testo aggiuntivo, SOLO il JSON."""
+
+
+def _get_volatility_status(volatility_ratio: float) -> str:
+    """Get human-readable volatility status."""
+    if volatility_ratio < 0.8:
+        return "LOW (calmer than usual)"
+    elif volatility_ratio < 1.2:
+        return "NORMAL (typical range)"
+    elif volatility_ratio < 1.5:
+        return "HIGH (elevated volatility)"
+    else:
+        return "EXTREME (very volatile - caution!)"
+
+
+def _get_atr_sl_range(atr_pct: float, volatility_ratio: float) -> str:
+    """Get recommended stop loss range based on ATR."""
+    if not atr_pct or atr_pct <= 0:
+        return "N/A (ATR data unavailable)"
+
+    if volatility_ratio < 0.8:
+        multiplier_min, multiplier_max = 2.5, 3.5
+    elif volatility_ratio < 1.2:
+        multiplier_min, multiplier_max = 2.0, 3.0
+    elif volatility_ratio < 1.5:
+        multiplier_min, multiplier_max = 1.5, 2.5
+    else:
+        multiplier_min, multiplier_max = 1.5, 2.0
+
+    sl_min = max(1.5, min(6.0, atr_pct * multiplier_min))
+    sl_max = max(1.5, min(6.0, atr_pct * multiplier_max))
+
+    return f"{sl_min:.1f}% - {sl_max:.1f}%"
+
+
+def _get_atr_tp_range(atr_pct: float, volatility_ratio: float) -> str:
+    """Get recommended take profit range based on ATR."""
+    if not atr_pct or atr_pct <= 0:
+        return "N/A (ATR data unavailable)"
+
+    # TP should be 2-4x the stop loss
+    if volatility_ratio < 0.8:
+        multiplier_min, multiplier_max = 2.5, 3.5
+    elif volatility_ratio < 1.2:
+        multiplier_min, multiplier_max = 2.0, 3.0
+    else:
+        multiplier_min, multiplier_max = 1.5, 2.5
+
+    sl_avg = atr_pct * ((multiplier_min + multiplier_max) / 2)
+    tp_min = max(3.0, min(15.0, sl_avg * 2))
+    tp_max = max(3.0, min(15.0, sl_avg * 4))
+
+    return f"{tp_min:.1f}% - {tp_max:.1f}%"

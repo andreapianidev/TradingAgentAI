@@ -306,6 +306,42 @@ class TradingAgent:
         logger.info(f"  Price vs EMA20: {'ABOVE' if indicators.get('price_above_ema20') else 'BELOW'}")
         logger.info(f"  Volume SMA: {indicators.get('volume_sma', 0):,.0f}")
 
+        # Log ATR volatility analysis
+        logger.info("-" * 40)
+        logger.info("VOLATILITY ANALYSIS (ATR):")
+        atr = indicators.get('atr', 0)
+        atr_30 = indicators.get('atr_30', 0)
+        atr_pct = indicators.get('atr_pct', 0)
+        volatility_ratio = indicators.get('volatility_ratio', 1.0)
+
+        logger.info(f"  ATR (14): {atr:.2f}")
+        logger.info(f"  ATR (30): {atr_30:.2f}")
+        logger.info(f"  ATR%: {atr_pct:.2f}%" if atr_pct else "  ATR%: N/A")
+        logger.info(f"  Volatility Ratio: {volatility_ratio:.2f}")
+
+        if volatility_ratio < 0.8:
+            vol_status = "LOW (calmer than usual)"
+        elif volatility_ratio < 1.2:
+            vol_status = "NORMAL"
+        elif volatility_ratio < 1.5:
+            vol_status = "HIGH (elevated)"
+        else:
+            vol_status = "EXTREME (caution!)"
+
+        logger.info(f"  Status: {vol_status}")
+
+        # Calculate and show recommended ranges
+        if atr_pct and atr_pct > 0:
+            if volatility_ratio < 1.2:
+                sl_mult_range = "2.0-3.0x"
+            elif volatility_ratio < 1.5:
+                sl_mult_range = "1.5-2.5x"
+            else:
+                sl_mult_range = "1.5-2.0x"
+
+            logger.info(f"  Recommended SL multiplier: {sl_mult_range} ATR")
+            logger.info(f"  Trading Mode: {'PAPER' if portfolio_manager.is_paper_trading else 'LIVE'}")
+
         # 3. Calculate pivot points
         pivot_points = calculate_pivot_points(ohlcv)
         logger.info("-" * 40)
@@ -338,7 +374,13 @@ class TradingAgent:
         context_id = db_ops.save_market_context(
             symbol=symbol,
             price=price,
-            indicators=indicators,
+            indicators={
+                **indicators,
+                'atr': indicators.get('atr'),
+                'atr_30': indicators.get('atr_30'),
+                'atr_pct': indicators.get('atr_pct'),
+                'volatility_ratio': indicators.get('volatility_ratio')
+            },
             pivot_points=pivot_points,
             forecast=forecast,
             orderbook=orderbook,
@@ -348,7 +390,13 @@ class TradingAgent:
                 "news_count": len(news),
                 "news": news[:5] if news else [],
                 "whale_alerts_count": len(whale_alerts),
-                "whale_flow": whale_flow
+                "whale_flow": whale_flow,
+                "atr_analysis": {
+                    "atr": indicators.get('atr'),
+                    "atr_pct": indicators.get('atr_pct'),
+                    "volatility_ratio": indicators.get('volatility_ratio'),
+                    "trading_mode": "paper" if portfolio_manager.is_paper_trading else "live"
+                }
             }
         )
 
@@ -357,9 +405,16 @@ class TradingAgent:
 
         # 8. Get LLM decision
         logger.info("Requesting LLM decision...")
+
+        # Add is_paper flag to portfolio dict for AI to know trading mode
+        portfolio_with_mode = {
+            **portfolio,
+            'is_paper': portfolio_manager.is_paper_trading
+        }
+
         decision = llm_client.get_trading_decision(
             symbol=symbol,
-            portfolio=portfolio,
+            portfolio=portfolio_with_mode,
             market_data=market_data,
             indicators=indicators,
             pivot_points=pivot_points,

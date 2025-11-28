@@ -63,8 +63,18 @@ class TechnicalIndicators:
             ema20 = self.calculate_ema(EMA_LONG_PERIOD)
             volume_sma = self.calculate_volume_sma()
 
+            # Calculate ATR for volatility analysis
+            atr_14 = self.calculate_atr(period=14)
+            atr_30 = self.calculate_atr(period=30)
+
             # Get latest values
             latest_close = float(self.df["close"].iloc[-1])
+
+            # Calculate ATR as percentage of price
+            atr_pct = (atr_14 / latest_close * 100) if atr_14 > 0 and latest_close > 0 else None
+
+            # Calculate volatility ratio (current vs average)
+            volatility_ratio = (atr_14 / atr_30) if atr_14 > 0 and atr_30 > 0 else 1.0
 
             return {
                 "macd": macd["macd"],
@@ -75,6 +85,11 @@ class TechnicalIndicators:
                 "ema20": ema20,
                 "volume_sma": volume_sma,
                 "price": latest_close,
+                # ATR volatility indicators
+                "atr": atr_14,
+                "atr_30": atr_30,
+                "atr_pct": atr_pct,
+                "volatility_ratio": volatility_ratio,
                 # Additional analysis
                 "macd_bullish": macd["macd"] > macd["signal"],
                 "macd_histogram_rising": self._is_histogram_rising(macd),
@@ -98,6 +113,10 @@ class TechnicalIndicators:
             "ema20": None,
             "volume_sma": None,
             "price": None,
+            "atr": None,
+            "atr_30": None,
+            "atr_pct": None,
+            "volatility_ratio": 1.0,  # Default to 1.0 (normal)
             "macd_bullish": None,
             "macd_histogram_rising": None,
             "rsi_overbought": None,
