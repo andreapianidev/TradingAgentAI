@@ -329,6 +329,7 @@ class SupabaseOperations:
         exposure_pct: float,
         total_pnl: float = None,
         total_pnl_pct: float = None,
+        initial_balance: float = None,
         raw_data: Dict[str, Any] = None
     ) -> str:
         """Save a portfolio snapshot."""
@@ -341,6 +342,7 @@ class SupabaseOperations:
             "exposure_pct": exposure_pct,
             "total_pnl": total_pnl or 0,
             "total_pnl_pct": total_pnl_pct or 0,
+            "initial_balance": initial_balance,
             "raw_data": raw_data,
             "trading_mode": "paper" if settings.PAPER_TRADING else "live"
         }

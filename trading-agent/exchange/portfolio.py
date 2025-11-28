@@ -30,7 +30,28 @@ class PortfolioManager:
         logger.info(f"PortfolioManager initialized - Exchange: {settings.EXCHANGE.upper()}, Mode: {mode_str}")
         logger.info(f"Using Alpaca API: {settings.ALPACA_BASE_URL}")
 
-        self._initial_equity = None
+        # Try to load initial equity from database
+        self._initial_equity = self._load_initial_equity_from_db()
+        if self._initial_equity:
+            logger.info(f"Loaded initial equity from database: ${self._initial_equity:.2f}")
+
+    def _load_initial_equity_from_db(self) -> Optional[float]:
+        """
+        Load initial equity from database snapshots.
+
+        Returns:
+            Initial equity value from database, or None if no snapshots exist
+        """
+        try:
+            # Get any snapshot that has initial_balance set
+            snapshots = db_ops.get_portfolio_history(limit=1)
+            if snapshots and snapshots[0].get("initial_balance"):
+                initial_balance = float(snapshots[0]["initial_balance"])
+                return initial_balance
+        except Exception as e:
+            logger.warning(f"Could not load initial equity from database: {e}")
+
+        return None
 
     def get_portfolio_state(self) -> Dict[str, Any]:
         """
@@ -94,6 +115,7 @@ class PortfolioManager:
             exposure_pct=state.get("exposure_pct", 0),
             total_pnl=state.get("total_pnl"),
             total_pnl_pct=state.get("total_pnl_pct"),
+            initial_balance=self._initial_equity,
             raw_data=state
         )
 
