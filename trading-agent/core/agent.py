@@ -137,6 +137,39 @@ class TradingAgent:
         current_exchange = settings.EXCHANGE
         previous_exchange = transition_manager.detect_exchange_change(current_exchange)
 
+        # Check if this is first run with existing positions on current exchange
+        # If so, create a baseline "completed" transition record for tracking
+        if previous_exchange is None:
+            from database.operations import transition_ops
+            last_transition = transition_ops.get_last_completed_transition()
+
+            if not last_transition:
+                # First run ever - check if we have positions
+                open_positions = db_ops.get_open_positions()
+                if open_positions and open_positions[0].get("exchange") == current_exchange:
+                    logger.info(f"First run: Found {len(open_positions)} existing positions on {current_exchange}")
+                    logger.info("Creating baseline transition record for tracking...")
+
+                    # Create a completed "initial" transition
+                    position_symbols = [p.get('symbol') for p in open_positions]
+                    transition_id = transition_ops.create_transition(
+                        from_exchange=current_exchange,
+                        to_exchange=current_exchange,
+                        strategy="MANUAL",  # Use MANUAL since this is just tracking
+                        position_ids=position_symbols,
+                        trading_mode="paper" if settings.PAPER_TRADING else "live"
+                    )
+
+                    if transition_id:
+                        # Immediately complete it since we're not actually transitioning
+                        transition_ops.complete_transition(transition_id, total_pnl=0, total_pnl_pct=0)
+                        transition_ops.add_transition_log(
+                            transition_id,
+                            f"Baseline record: System started with {len(open_positions)} positions on {current_exchange}",
+                            "INFO"
+                        )
+                        logger.info(f"✓ Created baseline transition record: {transition_id}")
+
         # Detect exchange change and start transition
         if previous_exchange and previous_exchange != current_exchange:
             logger.warning("=" * 60)

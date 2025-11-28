@@ -41,6 +41,7 @@ class ExchangeTransitionManager:
     def detect_exchange_change(self, current_exchange: str) -> Optional[str]:
         """
         Detect if the exchange has changed by comparing with last completed transition.
+        Also detects if there are existing positions on a different exchange (first run case).
 
         Args:
             current_exchange: Current exchange from settings
@@ -53,9 +54,30 @@ class ExchangeTransitionManager:
             last_transition = transition_ops.get_last_completed_transition()
 
             if not last_transition:
-                # No previous transition - first run or no history
-                logger.debug("No previous transition found - first run")
-                return None
+                # No previous transition - check if there are existing open positions
+                logger.debug("No previous transition found - checking for existing positions")
+
+                # Query open positions to detect which exchange they're on
+                from database.operations import db_ops
+                open_positions = db_ops.get_open_positions()
+
+                if open_positions:
+                    # Get exchange from first position (all should be on same exchange)
+                    position_exchange = open_positions[0].get("exchange")
+
+                    if position_exchange and position_exchange != current_exchange:
+                        logger.info(f"First run: Detected existing positions on {position_exchange}, current setting is {current_exchange}")
+                        logger.info(f"Exchange change detected: {position_exchange} → {current_exchange}")
+                        return position_exchange
+                    elif position_exchange == current_exchange:
+                        logger.debug(f"Existing positions found on {position_exchange}, matches current exchange")
+                        return None
+                    else:
+                        logger.warning(f"Position found but exchange field is empty: {open_positions[0]}")
+                        return None
+                else:
+                    logger.debug("No open positions found - first run with clean slate")
+                    return None
 
             previous_exchange = last_transition.get("to_exchange")
 
