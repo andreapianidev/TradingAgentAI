@@ -1907,8 +1907,10 @@ class AlpacaClient:
             # Positions endpoint uses different format: BTCUSD (no slash) vs BTC/USD (for orders)
             # Strip slash for crypto symbols when querying positions
             position_symbol = alpaca_symbol.replace("/", "") if "/" in alpaca_symbol else alpaca_symbol
-            # Use get_open_position() - more efficient than get_all_positions() for single symbol
-            position = self._retry_request(self.trading_client.get_open_position, position_symbol)
+            
+            # Call get_open_position directly (without _retry_request) to avoid treating
+            # 404 "position does not exist" as a critical error
+            position = self.trading_client.get_open_position(position_symbol)
 
             if position:
                 return {
