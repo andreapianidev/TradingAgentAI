@@ -113,7 +113,19 @@ class AlpacaClient:
         logger.info("Disconnected from Alpaca")
 
     def _get_symbol(self, symbol: str) -> str:
-        """Convert short symbol to Alpaca format."""
+        """Convert short symbol to Alpaca format (for orders and market data)."""
+        # CRITICAL: Check if symbol is already formatted to prevent double-formatting
+        # Examples of already-formatted: "BTC/USD", "BTCUSD", "ETH/USDT", "ETHUSDT"
+        if "/" in symbol:
+            # Already has slash (BTC/USD) - use as-is
+            self._is_crypto = True
+            return symbol
+        elif symbol.endswith("USD") or symbol.endswith("USDT"):
+            # Already formatted without slash (BTCUSD, ETHUSDT) from _fetch_positions_internal
+            # This prevents "BTCUSD" from becoming "BTCUSD/USD" -> "BTCUSDUSD"
+            self._is_crypto = True
+            return f"{symbol[:-3]}/{symbol[-3:]}" if symbol.endswith("USD") else f"{symbol[:-4]}/{symbol[-4:]}"
+        
         # Check if it's a crypto symbol
         if symbol in ALPACA_CRYPTO_SYMBOLS:
             self._is_crypto = True
