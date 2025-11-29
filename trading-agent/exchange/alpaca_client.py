@@ -1166,9 +1166,14 @@ class AlpacaClient:
             logger.info(f"Submitting order: {side} {quantity:.6f} {alpaca_symbol}")
             order = self._retry_request(self.trading_client.submit_order, order_request)
 
-            # Wait for fill
-            time.sleep(1)
-            filled_order = self.trading_client.get_order_by_id(order.id)
+            # Wait for order to fill and get final details
+            time.sleep(2)
+            # Defensive access: handle both object and dict responses
+            order_id = order.id if hasattr(order, 'id') else order.get('id', None)
+            if not order_id:
+                logger.error(f"Order response missing ID: {type(order)}")
+                return {"success": False, "error": "Order ID not found in response"}
+            filled_order = self.trading_client.get_order_by_id(order_id)
 
             entry_price = float(filled_order.filled_avg_price) if filled_order.filled_avg_price else current_price
 
@@ -1455,7 +1460,12 @@ class AlpacaClient:
 
                     # Get the order details
                     if hasattr(close_response, 'id'):
-                        filled_order = self.trading_client.get_order_by_id(close_response.id)
+                        # Defensive access for order ID
+                        response_id = close_response.id if hasattr(close_response, 'id') else close_response.get('id', None)
+                        if response_id:
+                            filled_order = self.trading_client.get_order_by_id(response_id)
+                        else:
+                            filled_order = None
 
                         return {
                             "success": True,
@@ -1591,10 +1601,13 @@ class AlpacaClient:
                                 # Wait and get order details
                                 time.sleep(2)
                                 if hasattr(close_response, 'id'):
-                                    order = self.trading_client.get_order_by_id(close_response.id)
-                                    if order:
-                                        logger.info(f"Retrieved order details from native close")
-                                        break
+                                    # Defensive access for order ID
+                                    response_id = close_response.id if hasattr(close_response, 'id') else close_response.get('id', None)
+                                    if response_id:
+                                        order = self.trading_client.get_order_by_id(response_id)
+                                        if order:
+                                            logger.info(f"Retrieved order details from native close")
+                                            break
                             except Exception as native_error:
                                 logger.error(f"Native close also failed: {native_error}")
                                 # Return graceful error instead of crashing
@@ -1616,7 +1629,12 @@ class AlpacaClient:
 
             # STEP 6: Wait for fill and get execution details
             time.sleep(2)
-            filled_order = self.trading_client.get_order_by_id(order.id)
+            # Defensive access: handle both object and dict responses
+            order_id = order.id if hasattr(order, 'id') else order.get('id', None)
+            if not order_id:
+                logger.error(f"Order response missing ID: {type(order)}")
+                return {"success": False, "error": "Order ID not found in response"}
+            filled_order = self.trading_client.get_order_by_id(order_id)
 
             # Get exit price from filled order
             exit_price = float(filled_order.filled_avg_price) if filled_order.filled_avg_price else entry_price
@@ -1907,9 +1925,11 @@ class AlpacaClient:
             # Position not found or other error - return None
             error_str = str(e).lower()
             if "not found" in error_str or "does not exist" in error_str:
+                # Expected when checking recently closed positions - use DEBUG level
+                logger.debug(f"Position {symbol} not found (expected if recently closed)")
                 return None
-            # For other errors, fall back to get_all_positions
-            logger.warning(f"get_open_position failed for {symbol}, falling back to get_all_positions: {e}")
+            # Unexpected errors should still be logged as warnings
+            logger.warning(f"Unexpected error in get_open_position for {symbol}, falling back: {e}")
             positions = self._fetch_positions_internal()
             return next((p for p in positions if p["symbol"] == symbol), None)
 
