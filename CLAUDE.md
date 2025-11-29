@@ -2,6 +2,31 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠️ CRITICAL: Project Structure
+
+**ALL PYTHON CODE IS IN `trading-agent/` DIRECTORY**
+
+```
+AgenteTradingAI/
+├── trading-agent/          ← 🎯 ALL PYTHON CODE HERE
+│   ├── core/              ← Agent logic, LLM client
+│   ├── exchange/          ← Alpaca/Hyperliquid clients
+│   ├── database/          ← Supabase operations
+│   ├── data/              ← Market data, news, sentiment
+│   ├── indicators/        ← Technical analysis
+│   ├── main.py           ← Entry point
+│   └── requirements.txt
+├── web/                   ← Next.js dashboard
+│   ├── app/              ← Routes
+│   ├── components/       ← React components
+│   └── lib/              ← Supabase client
+└── utils/                 ← Shared utilities (logs only)
+```
+
+**DO NOT create or modify files outside `trading-agent/` for Python code!**
+
+Previous duplicate directories (`core/`, `database/`, `exchange/`, etc.) in root have been removed to prevent confusion.
+
 ## Project Overview
 
 AI-powered cryptocurrency trading bot with a Next.js dashboard. The bot analyzes BTC, ETH, SOL using technical indicators and LLM-based decision making, executing trades via Alpaca's paper trading API.
@@ -63,6 +88,7 @@ All tables use `trading_` prefix:
 - `trading_positions`: Open/closed positions
 - `trading_portfolio_snapshots`: Equity snapshots over time
 - `trading_market_contexts`: Technical indicators, forecasts
+- `trading_ai_analysis`: Daily AI market analysis
 - `trading_settings`: Runtime configuration
 - `trading_alerts`: System alerts
 
@@ -78,12 +104,33 @@ All tables use `trading_` prefix:
 
 ## Key Files
 
-- `trading-agent/main.py`: Entry point
-- `trading-agent/core/agent.py`: Main orchestration
-- `trading-agent/core/llm_client.py`: DeepSeek LLM integration
-- `trading-agent/exchange/alpaca_client.py`: Alpaca API wrapper
-- `trading-agent/exchange/exchange_factory.py`: Exchange selection
-- `trading-agent/config/settings.py`: Pydantic settings
-- `web/lib/supabase.ts`: Supabase client + type definitions
-- `web/app/page.tsx`: Dashboard home
-- `web/app/bot/page.tsx`: Activity console
+### Python Bot (trading-agent/)
+- `main.py`: Entry point
+- `core/agent.py`: Main orchestration
+- `core/llm_client.py`: DeepSeek LLM integration
+- `exchange/alpaca_client.py`: Alpaca API wrapper (crypto symbol handling)
+- `exchange/exchange_factory.py`: Exchange selection
+- `database/operations.py`: Database wrapper (delegates to supabase_operations)
+- `database/supabase_operations.py`: Direct Supabase client
+- `config/settings.py`: Pydantic settings
+
+### Dashboard (web/)
+- `lib/supabase.ts`: Supabase client + type definitions
+- `app/page.tsx`: Dashboard home
+- `app/bot/page.tsx`: Activity console
+
+## Common Pitfalls
+
+1. **Alpaca Symbol Formats**: 
+   - Orders/Market Data: `BTC/USD` (with slash)
+   - Position APIs: `BTCUSD` (no slash) - "old symbology"
+   - Use `_get_position_symbol()` helper in alpaca_client.py
+
+2. **Database Wrappers**:
+   - `database/operations.py` delegates to `supabase_operations.py`
+   - Always ensure method signatures match between both files
+   - Example: `save_ai_analysis()` uses `summary_text`, not `analysis_text`
+
+3. **File Locations**:
+   - ALL Python code MUST be in `trading-agent/`
+   - Never create duplicate files in project root

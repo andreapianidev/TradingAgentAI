@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from 'react'
 import { supabase, TradingPosition, TradingPortfolioSnapshot } from '@/lib/supabase'
 import { formatCurrency, formatPercent, formatDate, cn, getPnlColor, getDirectionBgColor, getStatusColor } from '@/lib/utils'
 import { ArrowUpRight, ArrowDownRight, X, Filter, Download, RefreshCw, CheckCircle, AlertCircle, TrendingUp, TrendingDown, Activity, DollarSign, Wallet, PiggyBank, Target, BarChart3 } from 'lucide-react'
-import StrategyBadge from '@/components/StrategyBadge'
 
 const SYNC_INTERVAL = 30000 // 30 seconds
 const INITIAL_CAPITAL = 100000 // Starting capital for P&L calculations
@@ -247,28 +246,24 @@ export default function PositionsPage() {
           <h1 className="text-2xl font-bold text-white title-gradient cursor-default">
             Positions
           </h1>
-          <div className="flex items-center gap-3">
-            <p className="text-gray-400 flex items-center gap-2">
-              Manage your trading positions
-              {lastSync && (
-                <span className="text-xs flex items-center gap-1">
-                  {syncError ? (
-                    <AlertCircle className="w-3 h-3 text-red-400 animate-pulse" />
-                  ) : (
-                    <CheckCircle className="w-3 h-3 text-green-400 sync-indicator" />
-                  )}
-                  <span className={cn(
-                    "transition-colors duration-300",
-                    syncError ? 'text-red-400' : 'text-green-400'
-                  )}>
-                    Synced {Math.round((Date.now() - lastSync.getTime()) / 1000)}s ago
-                  </span>
+          <p className="text-gray-400 flex items-center gap-2">
+            Manage your trading positions
+            {lastSync && (
+              <span className="text-xs flex items-center gap-1">
+                {syncError ? (
+                  <AlertCircle className="w-3 h-3 text-red-400 animate-pulse" />
+                ) : (
+                  <CheckCircle className="w-3 h-3 text-green-400 sync-indicator" />
+                )}
+                <span className={cn(
+                  "transition-colors duration-300",
+                  syncError ? 'text-red-400' : 'text-green-400'
+                )}>
+                  Synced {Math.round((Date.now() - lastSync.getTime()) / 1000)}s ago
                 </span>
-              )}
-            </p>
-            <div className="h-4 w-px bg-gray-700" />
-            <StrategyBadge />
-          </div>
+              </span>
+            )}
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <button

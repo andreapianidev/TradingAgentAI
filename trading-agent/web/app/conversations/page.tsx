@@ -40,7 +40,8 @@ interface LLMResponse {
     action?: string
     symbol?: string
     direction?: string
-    confidence?: number
+    confidence?: number  // For trading decisions (0.0 to 1.0)
+    sentiment_score?: number  // For news analysis (-1.0 to 1.0)
     reasoning?: string
     leverage?: number
     position_size_pct?: number
@@ -58,6 +59,7 @@ interface NewsItem {
   url?: string
   source?: string
   sentiment?: string
+  sentiment_score?: number  // -1.0 to 1.0 for news analysis
   symbols?: string[]
 }
 
@@ -500,9 +502,14 @@ export default function ConversationsPage() {
                               {decision.direction && ` ${decision.direction.toUpperCase()}`}
                             </span>
                           )}
-                              {decision?.confidence && (
+                              {decision?.confidence !== undefined && (
                                 <span className="text-sm text-gray-400">
                                   {(decision.confidence * 100).toFixed(0)}% confidence
+                                </span>
+                              )}
+                              {decision?.sentiment_score !== undefined && (
+                                <span className="text-sm text-gray-400">
+                                  {(Math.abs(decision.sentiment_score) * 100).toFixed(0)}% sentiment
                                 </span>
                               )}
                             </>
@@ -707,12 +714,25 @@ export default function ConversationsPage() {
                                         </span>
                                       </div>
                                     )}
-                                    <div>
-                                      <span className="text-gray-500">Confidence:</span>
-                                      <span className="ml-2 text-white font-medium">
-                                        {((decision.confidence || 0) * 100).toFixed(1)}%
-                                      </span>
-                                    </div>
+                                    {decision.confidence !== undefined && (
+                                      <div>
+                                        <span className="text-gray-500">Confidence:</span>
+                                        <span className="ml-2 text-white font-medium">
+                                          {(decision.confidence * 100).toFixed(1)}%
+                                        </span>
+                                      </div>
+                                    )}
+                                    {decision.sentiment_score !== undefined && (
+                                      <div>
+                                        <span className="text-gray-500">Sentiment Score:</span>
+                                        <span className={cn(
+                                          "ml-2 font-medium",
+                                          decision.sentiment_score > 0 ? 'text-green-400' : decision.sentiment_score < 0 ? 'text-red-400' : 'text-gray-400'
+                                        )}>
+                                          {(decision.sentiment_score * 100).toFixed(1)}%
+                                        </span>
+                                      </div>
+                                    )}
                                     {decision.leverage && (
                                       <div>
                                         <span className="text-gray-500">Leverage:</span>

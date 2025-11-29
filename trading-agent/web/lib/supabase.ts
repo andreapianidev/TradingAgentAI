@@ -376,3 +376,67 @@ export interface TradingBotLog {
   error_stack?: string
   trading_mode: 'paper' | 'live'
 }
+
+export interface TradingWatchlist {
+  id: string
+  symbol: string
+  tier: 'CORE' | 'OPPORTUNISTIC' | 'SATELLITE'
+  is_active: boolean
+  opportunity_score?: number
+  opportunity_level?: 'EXCELLENT' | 'GOOD' | 'MODERATE' | 'WEAK' | 'POOR'
+  technical_score?: number
+  sentiment_score?: number
+  trending_score?: number
+  liquidity_score?: number
+  volatility_score?: number
+  news_score?: number
+  current_price?: number
+  volume_24h?: number
+  market_cap?: number
+  percent_change_24h?: number
+  criteria_met?: any
+  reasoning?: string[]
+  raw_evaluation_data?: any
+  target_allocation_usd?: number
+  current_allocation_usd?: number
+  recommended_action?: string
+  added_at: string
+  last_evaluated_at?: string
+  removed_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface TradingExchangeTransition {
+  id: string
+  created_at: string
+  updated_at: string
+  transition_strategy: 'IMMEDIATE' | 'PROFITABLE' | 'WAIT_PROFIT' | 'MANUAL'
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled'
+  from_exchange: string
+  to_exchange: string
+  total_positions: number
+  positions_closed: number
+  positions_remaining: number
+  positions_in_profit: number
+  positions_in_loss: number
+  total_pnl?: number
+  total_pnl_pct?: number
+  started_at?: string
+  completed_at?: string
+  last_check_at?: string
+  manual_override_required: boolean
+  manual_override_approved: boolean
+  manual_override_by?: string
+  manual_override_at?: string
+  error_count: number
+  last_error?: string
+  retry_after?: string
+  position_ids: string[]
+  transition_log: Array<{
+    timestamp: string
+    level: 'INFO' | 'WARNING' | 'ERROR'
+    message: string
+  }>
+  trading_mode: 'paper' | 'live'
+}

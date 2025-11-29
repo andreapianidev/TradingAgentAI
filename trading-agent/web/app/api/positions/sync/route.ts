@@ -97,9 +97,10 @@ export async function POST() {
       // Return gracefully - credentials not configured on this environment
       return NextResponse.json({
         success: false,
-        error: 'Alpaca credentials not configured. Position sync is only available when running the bot.',
-        message: 'This is expected on Vercel - the bot syncs positions when running on GitHub Actions.',
-        configured: false
+        configured: false,
+        error: 'Alpaca credentials not configured on this environment',
+        message: 'This feature is only available when Alpaca API keys are configured. The bot on GitHub Actions automatically syncs positions every 15 minutes.',
+        help: 'To enable manual sync from dashboard, add ALPACA_API_KEY and ALPACA_SECRET_KEY to Vercel environment variables.'
       }, { status: 200 }) // Use 200 to avoid console errors
     }
 

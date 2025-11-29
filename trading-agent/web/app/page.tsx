@@ -20,6 +20,10 @@ import OpenPositions from '@/components/OpenPositions'
 import AlertsPanel from '@/components/AlertsPanel'
 import CostSummaryCard from '@/components/CostSummaryCard'
 import StrategyBadge from '@/components/StrategyBadge'
+import WatchlistWidget from '@/components/WatchlistWidget'
+import PortfolioDistributionChart from '@/components/PortfolioDistributionChart'
+import DecisionTimeline from '@/components/DecisionTimeline'
+import WatchlistAlerts from '@/components/WatchlistAlerts'
 
 const SYNC_INTERVAL = 30000 // 30 seconds
 
@@ -35,6 +39,7 @@ interface DashboardStats {
   exposurePct: number
   winRate: number
   totalTrades: number
+  timestamp?: string
 }
 
 export default function Dashboard() {
@@ -45,40 +50,70 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [lastSync, setLastSync] = useState<Date | null>(null)
+  const [syncMessage, setSyncMessage] = useState<string | null>(null)
 
-  // Sync positions from Alpaca
-  const syncPositions = useCallback(async (showLoading = false) => {
-    if (showLoading) setSyncing(true)
+  // Helper: Calculate next bot run time (every 15 minutes)
+  const calculateNextRun = (lastRunTimestamp?: string): number => {
+    if (!lastRunTimestamp) return 15
+
+    const lastRun = new Date(lastRunTimestamp).getTime()
+    const now = Date.now()
+    const elapsed = (now - lastRun) / 1000 / 60 // minutes
+    const next = Math.max(0, 15 - Math.floor(elapsed))
+
+    return next
+  }
+
+  // Helper: Determine indicator color based on data freshness
+  const getDataFreshnessColor = (timestamp?: string): string => {
+    if (!timestamp) return "bg-gray-500"
+
+    const age = (Date.now() - new Date(timestamp).getTime()) / 1000 / 60 // minutes
+
+    if (age < 5) return "bg-green-500 animate-pulse"
+    if (age < 20) return "bg-yellow-500"
+    return "bg-red-500 animate-pulse"
+  }
+
+  // Manual sync from Alpaca (optional feature)
+  const manualSyncAlpaca = async () => {
+    setSyncing(true)
+    setSyncMessage(null)
     try {
       const res = await fetch('/api/positions/sync', { method: 'POST' })
       const data = await res.json()
+
       if (data.success) {
         setLastSync(new Date())
+        setSyncMessage('✓ Synced successfully from Alpaca')
+        await fetchDashboardData()
+      } else if (!data.configured) {
+        setSyncMessage('ℹ️ Alpaca sync not available (credentials not configured)')
+      } else {
+        setSyncMessage(`⚠️ Sync failed: ${data.error || 'Unknown error'}`)
       }
     } catch (error) {
-      console.error('Error syncing positions:', error)
+      console.error('Sync error:', error)
+      setSyncMessage('❌ Sync error: Could not connect to API')
     } finally {
       setSyncing(false)
+      // Clear message after 5 seconds
+      setTimeout(() => setSyncMessage(null), 5000)
     }
-  }, [])
+  }
 
-  // Initial sync and data fetch
+  // Initial data fetch (no Alpaca sync)
   useEffect(() => {
-    const init = async () => {
-      await syncPositions(true)
-      await fetchDashboardData()
-    }
-    init()
+    fetchDashboardData()
   }, [])
 
-  // Auto-sync every 30 seconds
+  // Auto-refresh Supabase data every 10 seconds
   useEffect(() => {
     const interval = setInterval(async () => {
-      await syncPositions(false)
       await fetchDashboardData()
-    }, SYNC_INTERVAL)
+    }, 10000)
     return () => clearInterval(interval)
-  }, [syncPositions])
+  }, [])
 
   const fetchDashboardData = async () => {
     try {
@@ -102,7 +137,8 @@ export default function Dashboard() {
           openPositionsCount: snapshot.open_positions_count || 0,
           exposurePct: parseFloat(snapshot.exposure_pct) || 0,
           winRate: parseFloat(snapshot.win_rate) || 0,
-          totalTrades: snapshot.total_trades || 0
+          totalTrades: snapshot.total_trades || 0,
+          timestamp: snapshot.timestamp
         })
       } else {
         // No data yet - will show loading state
@@ -157,29 +193,46 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Sync Status Bar */}
-      <div className="flex items-center justify-between bg-gray-800/50 rounded-lg px-4 py-2 border border-gray-700/50">
-        <div className="flex items-center gap-3">
-          <div className={cn(
-            "w-2 h-2 rounded-full",
-            syncing ? "bg-yellow-500 animate-pulse" : "bg-green-500"
-          )} />
-          <span className="text-sm text-gray-400">
-            {syncing ? 'Syncing with Alpaca...' : lastSync
-              ? `Last sync: ${formatTimeAgo(lastSync.toISOString())}`
-              : 'Connecting to Alpaca...'}
-          </span>
-          <div className="h-4 w-px bg-gray-700" />
-          <StrategyBadge />
+      {/* Bot Status Bar */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between bg-gray-800/50 rounded-lg px-4 py-2 border border-gray-700/50">
+          <div className="flex items-center gap-3">
+            <div className={cn(
+              "w-2 h-2 rounded-full",
+              getDataFreshnessColor(stats?.timestamp)
+            )} />
+            <div className="flex flex-col">
+              <span className="text-sm text-gray-300">
+                {stats?.timestamp ? `Last bot run: ${formatTimeAgo(stats.timestamp)}` : 'Waiting for first bot run...'}
+              </span>
+              <span className="text-xs text-gray-500">
+                Bot runs every 15 minutes • Next run in ~{calculateNextRun(stats?.timestamp)} min
+              </span>
+            </div>
+            <div className="h-8 w-px bg-gray-700" />
+            <StrategyBadge />
+          </div>
+          <button
+            onClick={manualSyncAlpaca}
+            disabled={syncing}
+            className="text-sm text-gray-400 hover:text-white flex items-center gap-1.5 transition-colors disabled:opacity-50"
+            title="Manually sync positions from Alpaca (if credentials configured)"
+          >
+            <RefreshCw className={cn("w-3.5 h-3.5", syncing && "animate-spin")} />
+            Sync Alpaca
+          </button>
         </div>
-        <button
-          onClick={() => syncPositions(true)}
-          disabled={syncing}
-          className="text-sm text-gray-400 hover:text-white flex items-center gap-1.5 transition-colors"
-        >
-          <RefreshCw className={cn("w-3.5 h-3.5", syncing && "animate-spin")} />
-          Sync Now
-        </button>
+        {syncMessage && (
+          <div className={cn(
+            "text-xs px-4 py-2 rounded-lg border",
+            syncMessage.includes('✓') && "bg-green-500/10 border-green-500/20 text-green-400",
+            syncMessage.includes('ℹ️') && "bg-blue-500/10 border-blue-500/20 text-blue-400",
+            syncMessage.includes('⚠️') && "bg-yellow-500/10 border-yellow-500/20 text-yellow-400",
+            syncMessage.includes('❌') && "bg-red-500/10 border-red-500/20 text-red-400"
+          )}>
+            {syncMessage}
+          </div>
+        )}
       </div>
 
       {showAwaitingState && (
@@ -287,6 +340,28 @@ export default function Dashboard() {
 
         {/* Recent Trades */}
         <RecentTrades decisions={recentDecisions} />
+      </div>
+
+      {/* Dynamic Portfolio Management Section */}
+      <div className="space-y-6 mt-6">
+        <div className="flex items-center gap-2 px-4 py-2 bg-blue-900/20 border border-blue-800 rounded-lg">
+          <Target className="w-5 h-5 text-blue-400" />
+          <h2 className="text-lg font-semibold text-blue-400">Dynamic Portfolio Management</h2>
+        </div>
+
+        {/* Top Row: Watchlist + Distribution */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <WatchlistWidget maxItems={8} />
+          <PortfolioDistributionChart />
+        </div>
+
+        {/* Bottom Row: Decision Timeline + Alerts */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2">
+            <DecisionTimeline maxItems={10} />
+          </div>
+          <WatchlistAlerts maxItems={8} />
+        </div>
       </div>
     </div>
   )
