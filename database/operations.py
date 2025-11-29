@@ -215,6 +215,78 @@ class DatabaseOperations:
         """Get recent news events."""
         return supabase_ops.get_recent_news(symbol=symbol, limit=limit)
 
+    def save_news_batch(self, news_items: List[Dict[str, Any]]) -> int:
+        """Save multiple news items (deduplicates automatically)."""
+        return supabase_ops.save_news_batch(news_items)
+
+    # ============== Whale Alerts ==============
+
+    def save_whale_alerts_batch(self, alerts: List[Dict[str, Any]]) -> int:
+        """Save multiple whale alerts (deduplicates automatically)."""
+        return supabase_ops.save_whale_alerts_batch(alerts)
+
+    def save_whale_flow_summary(
+        self,
+        symbol: str,
+        inflow_exchange: float,
+        outflow_exchange: float,
+        net_flow: float,
+        alert_count: int,
+        interpretation: str = None
+    ) -> str:
+        """Save whale capital flow summary."""
+        return supabase_ops.save_whale_flow_summary(
+            symbol=symbol,
+            inflow_exchange=inflow_exchange,
+            outflow_exchange=outflow_exchange,
+            net_flow=net_flow,
+            alert_count=alert_count,
+            interpretation=interpretation
+        )
+
+    # ============== Market Global Data ==============
+
+    def save_market_global(self, coingecko_data: Dict[str, Any]) -> Optional[str]:
+        """Save CoinGecko global market data."""
+        return supabase_ops.save_market_global(coingecko_data)
+
+    # ============== AI Analysis ==============
+
+    def save_ai_analysis(
+        self,
+        symbol: str,
+        summary_text: str,
+        market_outlook: str,
+        confidence_score: float,
+        key_levels: Dict[str, Any] = None,
+        risk_factors: List[str] = None,
+        opportunities: List[str] = None,
+        trend_strength: str = None,
+        momentum: str = None,
+        volatility_level: str = None,
+        indicators_snapshot: Dict[str, Any] = None,
+        news_sentiment_summary: Dict[str, Any] = None
+    ) -> str:
+        """Save daily AI-generated market analysis."""
+        return supabase_ops.save_ai_analysis(
+            symbol=symbol,
+            summary_text=summary_text,
+            market_outlook=market_outlook,
+            confidence_score=confidence_score,
+            key_levels=key_levels,
+            risk_factors=risk_factors,
+            opportunities=opportunities,
+            trend_strength=trend_strength,
+            momentum=momentum,
+            volatility_level=volatility_level,
+            indicators_snapshot=indicators_snapshot,
+            news_sentiment_summary=news_sentiment_summary
+        )
+
+    def should_generate_analysis(self, symbol: str) -> bool:
+        """Check if AI analysis should be generated for symbol today."""
+        return supabase_ops.should_generate_analysis(symbol)
+
     # ============== Statistics ==============
 
     def get_trading_stats(self) -> Dict[str, Any]:

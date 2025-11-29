@@ -113,7 +113,7 @@ class AlpacaClient:
         logger.info("Disconnected from Alpaca")
 
     def _get_symbol(self, symbol: str) -> str:
-        """Convert short symbol to Alpaca format."""
+        """Convert short symbol to Alpaca format (for orders and market data)."""
         # Check if it's a crypto symbol
         if symbol in ALPACA_CRYPTO_SYMBOLS:
             self._is_crypto = True
@@ -125,6 +125,31 @@ class AlpacaClient:
         # Default: assume crypto
         self._is_crypto = True
         return f"{symbol}/USD"
+
+    def _get_position_symbol(self, symbol: str) -> str:
+        """
+        Convert short symbol to Alpaca position format.
+        
+        IMPORTANT: Alpaca's position management APIs (close_position, get_open_position)
+        require the "old symbology" for crypto: BTCUSD (no slash).
+        This is different from order placement and market data which use BTC/USD.
+        
+        Args:
+            symbol: Short symbol like BTC, ETH, AAPL
+            
+        Returns:
+            Symbol in position API format (BTCUSD for crypto, AAPL for stocks)
+        """
+        # First get the standard format
+        alpaca_symbol = self._get_symbol(symbol)
+        
+        # For crypto symbols, remove the slash for position APIs
+        if self._is_crypto and "/" in alpaca_symbol:
+            # BTC/USD -> BTCUSD
+            return alpaca_symbol.replace("/", "")
+        
+        # Stocks remain unchanged
+        return alpaca_symbol
 
     def _retry_request(self, func, *args, **kwargs) -> Any:
         """Execute a request with retry logic."""
@@ -653,15 +678,21 @@ class AlpacaClient:
         Close an existing position.
 
         Args:
-            symbol: Trading symbol
+            symbol: Trading symbol (short form like BTC, ETH, AAPL)
 
         Returns:
             Close execution details
         """
         try:
+            # CRITICAL: Alpaca's position APIs require "old symbology" for crypto
+            # - close_position needs BTCUSD (no slash) not BTC/USD
+            # - This is different from order placement which uses BTC/USD
+            position_symbol = self._get_position_symbol(symbol)
+            
+            # Also get the standard symbol for order cancellation
             alpaca_symbol = self._get_symbol(symbol)
 
-            # Get current position
+            # Get current position to verify it exists and get details
             positions = self._fetch_positions_internal()
             position = next((p for p in positions if p["symbol"] == symbol), None)
 
@@ -672,13 +703,14 @@ class AlpacaClient:
             entry_price = position["entry_price"]
             direction = position["direction"]
 
-            # Close position via API
+            # Close position via API using old symbology format
+            logger.info(f"Closing position for {symbol} (API symbol: {position_symbol})")
             self._retry_request(
                 self.trading_client.close_position,
-                alpaca_symbol
+                position_symbol  # Use BTCUSD format for crypto, not BTC/USD
             )
 
-            # Wait for close
+            # Wait for close to process
             time.sleep(1)
 
             # Get exit price from ticker
@@ -694,7 +726,7 @@ class AlpacaClient:
                 pnl = (entry_price - exit_price) * quantity
                 pnl_pct = ((entry_price / exit_price) - 1) * 100
 
-            # Cancel any pending orders for this symbol
+            # Cancel any pending orders for this symbol (orders use standard symbol format)
             self._cancel_orders_for_symbol(alpaca_symbol)
 
             logger.info(
