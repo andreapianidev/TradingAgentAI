@@ -1757,6 +1757,12 @@ class AlpacaClient:
     def _cancel_orders_for_symbol(self, symbol: str) -> Dict[str, Any]:
         """
         Cancel all open orders for a symbol and verify cancellation.
+        
+        CRITICAL: Searches for orders using both symbol formats to handle inconsistencies:
+        - Orders may be created with "BTC/USD" (slash format)
+        - But searched with "BTCUSD" (no slash)
+        
+        This prevents funds from staying locked in undetected orders.
 
         Returns:
             Dict with:
@@ -1768,21 +1774,51 @@ class AlpacaClient:
             from alpaca.trading.requests import GetOrdersRequest
             from alpaca.trading.enums import QueryOrderStatus
 
-            request = GetOrdersRequest(
-                status=QueryOrderStatus.OPEN,
-                symbols=[symbol]
-            )
+            # Build list of symbol variants to search
+            # This handles the case where orders were created with one format
+            # but we're searching with another
+            symbols_to_search = [symbol]
+            
+            # If symbol has slash, also search without slash
+            if "/" in symbol:
+                symbols_to_search.append(symbol.replace("/", ""))
+            # If symbol looks like crypto without slash (BTCUSD), also search with slash
+            elif symbol.endswith("USD") or symbol.endswith("USDT"):
+                if symbol.endswith("USD") and len(symbol) > 3:
+                    symbols_to_search.append(f"{symbol[:-3]}/{symbol[-3:]}")
+                elif symbol.endswith("USDT") and len(symbol) > 4:
+                    symbols_to_search.append(f"{symbol[:-4]}/{symbol[-4:]}")
+            
+            logger.debug(f"Searching for orders with symbol variants: {symbols_to_search}")
+            
+            # Search for orders with all symbol variants
+            all_open_orders = []
+            for search_symbol in symbols_to_search:
+                request = GetOrdersRequest(
+                    status=QueryOrderStatus.OPEN,
+                    symbols=[search_symbol]
+                )
+                orders = self._retry_request(self.trading_client.get_orders, request)
+                if orders:
+                    all_open_orders.extend(orders)
+            
+            # Remove duplicates (same order.id found with different symbol formats)
+            seen_ids = set()
+            unique_orders = []
+            for order in all_open_orders:
+                if order.id not in seen_ids:
+                    seen_ids.add(order.id)
+                    unique_orders.append(order)
 
-            open_orders = self._retry_request(self.trading_client.get_orders, request)
-
-            if not open_orders:
-                logger.debug(f"No open orders found for {symbol}")
+            if not unique_orders:
+                logger.debug(f"No open orders found for {symbol} (searched: {symbols_to_search})")
                 return {"success": True, "orders_cancelled": 0, "had_sl_tp": False}
 
             cancelled_count = 0
             had_sl_tp = False
 
-            for order in open_orders:
+            logger.info(f"Found {len(unique_orders)} open orders to cancel for {symbol}")
+            for order in unique_orders:
                 try:
                     self.trading_client.cancel_order_by_id(order.id)
                     logger.info(f"Cancelled order {order.id} for {symbol}")
@@ -1801,17 +1837,20 @@ class AlpacaClient:
             # Wait for cancellations to process
             time.sleep(2)
 
-            # Verify all orders are cancelled
-            verify_request = GetOrdersRequest(
-                status=QueryOrderStatus.OPEN,
-                symbols=[symbol]
-            )
-            remaining_orders = self._retry_request(self.trading_client.get_orders, verify_request)
+            # Verify all orders are cancelled (check all symbol variants)
+            remaining_count = 0
+            for search_symbol in symbols_to_search:
+                verify_request = GetOrdersRequest(
+                    status=QueryOrderStatus.OPEN,
+                    symbols=[search_symbol]
+                )
+                remaining_orders = self._retry_request(self.trading_client.get_orders, verify_request)
+                remaining_count += len(remaining_orders)
 
-            success = len(remaining_orders) == 0
+            success = remaining_count == 0
 
-            if remaining_orders:
-                logger.warning(f"Still have {len(remaining_orders)} open orders for {symbol} after cancellation")
+            if remaining_count > 0:
+                logger.warning(f"Still have {remaining_count} open orders for {symbol} after cancellation")
 
             logger.info(f"Cancelled {cancelled_count} orders for {symbol} (SL/TP: {had_sl_tp})")
 
