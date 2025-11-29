@@ -17,7 +17,7 @@ import {
   BarChart3,
   Sparkles
 } from 'lucide-react'
-import { supabase, TradingCost, TradingDecision } from '@/lib/supabase'
+import { supabase, TradingCost, TradingDecision, TradingPortfolioSnapshot } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 
 type TimeRange = '7d' | '30d' | '90d'
@@ -48,6 +48,8 @@ interface ROIData {
   netProfit: number
   roiPercentage: number
   tradesClosed: number
+  initialCapital?: number
+  currentEquity?: number
 }
 
 interface EnrichedCost extends TradingCost {
@@ -114,6 +116,17 @@ export default function CostsPage() {
       if (costsError) {
         console.error('Error fetching costs:', costsError)
         throw costsError
+      }
+
+      // Fetch portfolio snapshots for ROI calculation (Equity based)
+      const { data: snapshots, error: snapshotsError } = await supabase
+        .from('trading_portfolio_snapshots')
+        .select('total_equity_usdc, created_at')
+        .gte('created_at', startDate.toISOString())
+        .order('created_at', { ascending: true })
+
+      if (snapshotsError) {
+        console.error('Error fetching snapshots:', snapshotsError)
       }
 
       // Fetch related decisions for enrichment
@@ -201,30 +214,52 @@ export default function CostsPage() {
         })
         setCostBySymbol(bySymbol)
 
-        // Fetch closed positions for ROI calculation
-        const { data: closedPositions } = await supabase
+        // Calculate ROI based on Equity (Capital)
+        // 1. Get Initial Capital (from first snapshot or default 100k)
+        let initialCapital = 100000 // Default fallback
+        let currentEquity = 100000
+
+        if (snapshots && snapshots.length > 0) {
+          initialCapital = safeNumber(snapshots[0].total_equity_usdc)
+          currentEquity = safeNumber(snapshots[snapshots.length - 1].total_equity_usdc)
+        } else {
+          // Try to fetch latest snapshot if no period snapshots exist (e.g. new period)
+          const { data: latestSnapshot } = await supabase
+            .from('trading_portfolio_snapshots')
+            .select('total_equity_usdc')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single()
+
+          if (latestSnapshot) {
+            currentEquity = safeNumber(latestSnapshot.total_equity_usdc)
+            // If we have no history for the period, initial is same as current or 100k?
+            // Let's stick to 100k fallback for initial if absolutely no history found
+          }
+        }
+
+        // 2. Calculate Net Profit (Equity Change)
+        const netProfit = currentEquity - initialCapital
+
+        // 3. Calculate ROI %
+        const roiPct = initialCapital > 0 ? ((netProfit / initialCapital) * 100) : 0
+
+        // Fetch closed positions count for display
+        const { count: closedCount } = await supabase
           .from('trading_positions')
-          .select('realized_pnl, exit_timestamp')
+          .select('*', { count: 'exact', head: true })
           .eq('status', 'closed')
           .gte('exit_timestamp', startDate.toISOString())
 
-        if (closedPositions) {
-          const totalProfit = closedPositions.reduce(
-            (sum, p) => sum + safeNumber(p.realized_pnl),
-            0
-          )
-          const totalCosts = costs.reduce((sum: number, c: TradingCost) => sum + safeNumber(c.cost_usd), 0)
-          const netProfit = totalProfit - totalCosts
-          const roiPct = totalCosts > 0 ? ((netProfit / totalCosts) * 100) : 0
-
-          setRoiData({
-            totalCosts,
-            realizedProfit: totalProfit,
-            netProfit,
-            roiPercentage: roiPct,
-            tradesClosed: closedPositions.length
-          })
-        }
+        setRoiData({
+          totalCosts: costs.reduce((sum: number, c: TradingCost) => sum + safeNumber(c.cost_usd), 0),
+          realizedProfit: 0, // Not used in new formula but kept for type compatibility
+          netProfit,
+          roiPercentage: roiPct,
+          tradesClosed: closedCount || 0,
+          initialCapital,
+          currentEquity
+        })
 
         setLastUpdate(new Date())
       }
@@ -465,20 +500,26 @@ export default function CostsPage() {
               )}>
                 {roiData.netProfit >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
               </div>
-              <span className="text-sm font-semibold uppercase tracking-wide">ROI</span>
+              <span className="text-sm font-semibold uppercase tracking-wide">ROI (Equity)</span>
             </div>
             <div className={cn(
               "text-3xl font-bold mb-1 tabular-nums",
               roiData.netProfit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
             )}>
-              {roiData.roiPercentage >= 0 ? '+' : ''}{roiData.roiPercentage.toFixed(1)}%
+              {roiData.roiPercentage >= 0 ? '+' : ''}{roiData.roiPercentage.toFixed(2)}%
             </div>
-            <div className="text-sm text-gray-500 flex items-center gap-1">
-              <span className={roiData.netProfit >= 0 ? "text-emerald-600" : "text-red-600"}>
-                {formatCurrency(Math.abs(roiData.netProfit))}
-              </span>
-              <span>{roiData.netProfit >= 0 ? 'profit' : 'loss'}</span>
-              <span className="text-gray-400">({roiData.tradesClosed} trades)</span>
+            <div className="text-sm text-gray-500 flex flex-col gap-0.5">
+              <div className="flex items-center gap-1">
+                <span className={roiData.netProfit >= 0 ? "text-emerald-600" : "text-red-600"}>
+                  {formatCurrency(Math.abs(roiData.netProfit))}
+                </span>
+                <span>{roiData.netProfit >= 0 ? 'profit' : 'loss'}</span>
+              </div>
+              {roiData.initialCapital && (
+                <span className="text-xs text-gray-400">
+                  Base: {formatCurrency(roiData.initialCapital)}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -620,7 +661,7 @@ export default function CostsPage() {
               <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">By Symbol</h3>
               <div className="space-y-2">
                 {Object.entries(costBySymbol)
-                  .sort(([,a], [,b]) => (b.llm + b.fees) - (a.llm + a.fees))
+                  .sort(([, a], [, b]) => (b.llm + b.fees) - (a.llm + a.fees))
                   .slice(0, 5)
                   .map(([symbol, data]) => (
                     <div key={symbol} className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-700 last:border-0">
