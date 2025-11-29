@@ -1894,7 +1894,9 @@ class AlpacaClient:
 
     def get_position(self, symbol: str) -> Optional[Dict[str, Any]]:
         """
-        Get current position for a symbol using Alpaca's efficient single-position endpoint.
+        Get current position for a symbol using State Awareness approach.
+        Instead of calling get_open_position(symbol) which throws 404 if not found,
+        we fetch all positions and check if our symbol is in the list.
 
         Args:
             symbol: Trading symbol
@@ -1903,37 +1905,47 @@ class AlpacaClient:
             Position data or None
         """
         try:
-            alpaca_symbol = self._get_symbol(symbol)
-            # Positions endpoint uses different format: BTCUSD (no slash) vs BTC/USD (for orders)
-            # Strip slash for crypto symbols when querying positions
-            position_symbol = alpaca_symbol.replace("/", "") if "/" in alpaca_symbol else alpaca_symbol
+            # State Awareness Approach:
+            # Instead of asking for a specific position and catching 404 errors,
+            # we fetch all positions and check if our symbol is in the list.
+            # This is cleaner, more robust, and avoids "coding by exception".
             
-            # Call get_open_position directly (without _retry_request) to avoid treating
-            # 404 "position does not exist" as a critical error
-            position = self.trading_client.get_open_position(position_symbol)
-
-            if position:
-                return {
-                    "symbol": symbol,
-                    "quantity": abs(float(position.qty)),
-                    "entry_price": float(position.avg_entry_price),
-                    "current_price": float(position.current_price) if hasattr(position, 'current_price') else float(position.avg_entry_price),
-                    "direction": "long" if float(position.qty) > 0 else "short",
-                    "unrealized_pl": float(position.unrealized_pl) if hasattr(position, 'unrealized_pl') else 0,
-                    "unrealized_plpc": float(position.unrealized_plpc) if hasattr(position, 'unrealized_plpc') else 0,
-                }
+            # 1. Fetch ALL open positions (never throws 404)
+            all_positions = self.trading_client.get_all_positions()
+            
+            # 2. Normalize target symbol for robust matching
+            # Alpaca can use "BTC/USD" or "BTCUSD"
+            target_symbol = symbol.replace("/", "").upper()
+            
+            for pos in all_positions:
+                # Normalize current position symbol
+                current_symbol = pos.symbol.replace("/", "").upper()
+                
+                if current_symbol == target_symbol:
+                    # Found! Return formatted position data
+                    return {
+                        "symbol": symbol,
+                        "quantity": abs(float(pos.qty)),
+                        "entry_price": float(pos.avg_entry_price),
+                        "current_price": float(pos.current_price) if hasattr(pos, 'current_price') else float(pos.avg_entry_price),
+                        "direction": "long" if float(pos.qty) > 0 else "short",
+                        "unrealized_pl": float(pos.unrealized_pl) if hasattr(pos, 'unrealized_pl') else 0,
+                        "unrealized_plpc": float(pos.unrealized_plpc) if hasattr(pos, 'unrealized_plpc') else 0,
+                    }
+            
+            # 3. Not found in list -> We don't have it. Return None cleanly.
             return None
+
         except Exception as e:
-            # Position not found or other error - return None
-            error_str = str(e).lower()
-            if "not found" in error_str or "does not exist" in error_str:
-                # Expected when checking recently closed positions - use DEBUG level
-                logger.debug(f"Position {symbol} not found (expected if recently closed)")
+            # Only catch genuine errors (network, auth, etc)
+            logger.error(f"Error fetching positions in get_position for {symbol}: {e}")
+            # Fallback to internal fetch if main client fails
+            try:
+                positions = self._fetch_positions_internal()
+                return next((p for p in positions if p["symbol"] == symbol), None)
+            except Exception as fallback_error:
+                logger.error(f"Fallback fetch also failed: {fallback_error}")
                 return None
-            # Unexpected errors should still be logged as warnings
-            logger.warning(f"Unexpected error in get_open_position for {symbol}, falling back: {e}")
-            positions = self._fetch_positions_internal()
-            return next((p for p in positions if p["symbol"] == symbol), None)
 
     def has_open_position(self, symbol: str) -> bool:
         """Check if there's an open position for a symbol."""
