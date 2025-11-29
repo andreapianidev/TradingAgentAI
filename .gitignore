@@ -4,19 +4,22 @@ __pycache__/
 *$py.class
 *.so
 .Python
-venv/
-env/
-.venv/
-ENV/
 *.egg-info/
 dist/
 build/
 .eggs/
 
-# Environment
+# Environments
 .env
 .env.local
 .env.*.local
+venv/
+env/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+trading-agent/.env
 
 # Logs
 logs/
@@ -31,6 +34,7 @@ yarn-error.log*
 *.swp
 *.swo
 *.sublime-*
+*~
 
 # OS
 .DS_Store
@@ -55,6 +59,9 @@ htmlcov/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Project specific
+.claude/settings.local.json
 
 # Misc
 *.bak
