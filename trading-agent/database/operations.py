@@ -245,22 +245,32 @@ class DatabaseOperations:
     def save_ai_analysis(
         self,
         symbol: str,
-        analysis_text: str,
-        key_points: List[str] = None,
-        price_targets: Dict[str, Any] = None,
-        risk_assessment: str = None,
-        confidence_score: float = None,
-        raw_data: Dict[str, Any] = None
+        summary_text: str,
+        market_outlook: str,
+        confidence_score: float,
+        key_levels: Dict[str, Any] = None,
+        risk_factors: List[str] = None,
+        opportunities: List[str] = None,
+        trend_strength: str = None,
+        momentum: str = None,
+        volatility_level: str = None,
+        indicators_snapshot: Dict[str, Any] = None,
+        news_sentiment_summary: Dict[str, Any] = None
     ) -> str:
         """Save AI-generated market analysis."""
         return supabase_ops.save_ai_analysis(
             symbol=symbol,
-            analysis_text=analysis_text,
-            key_points=key_points,
-            price_targets=price_targets,
-            risk_assessment=risk_assessment,
+            summary_text=summary_text,
+            market_outlook=market_outlook,
             confidence_score=confidence_score,
-            raw_data=raw_data
+            key_levels=key_levels,
+            risk_factors=risk_factors,
+            opportunities=opportunities,
+            trend_strength=trend_strength,
+            momentum=momentum,
+            volatility_level=volatility_level,
+            indicators_snapshot=indicators_snapshot,
+            news_sentiment_summary=news_sentiment_summary
         )
 
     # ============== Whale Alerts ==============
